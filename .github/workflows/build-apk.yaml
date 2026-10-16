@@ -8,8 +8,10 @@ on:
 
 env:
   PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
-  P4A_USE_CERTIFI: 0       # ✅关掉certifi注入！之前是1就会乱加参数
+  P4A_USE_CERTIFI: 0
   P4A_ALLOW_TLS_13: 1
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
 
 jobs:
   build-apk:
@@ -29,16 +31,27 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 💥 Purge old buildozer cache FIRST（强制清旧缓存）
+      - name: 💥 Purge old buildozer cache FIRST
         run: |
           rm -rf ~/.buildozer
           mkdir -p ~/.buildozer
+          rm -rf $ANDROID_HOME
+
+      - name: Download Android SDK Command‑line Tools & Accept ALL Licenses
+        run: |
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          cd $ANDROID_HOME/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076798_latest.zip
+          unzip -q commandlinetools-linux-11076798_latest.zip
+          mv cmdline-tools latest || true
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;37.0.0" "platforms;android-33" "platform-tools"
 
       - name: Cache fresh Buildozer SDK & NDK
         uses: actions/cache@v4
         with:
-          path: ~/.buildozer
-          key: bilipink-fixed-${{ github.sha }}
+          path: [~/.buildozer, ${{ github.workspace }}/android-sdk]
+          key: bilipink-fixed-sdk-${{ github.sha }}
 
       - name: Install system dependencies
         run: |
@@ -48,13 +61,13 @@ jobs:
       - name: Install fixed python packages
         run: |
           python -m pip install --upgrade pip
-          pip install Cython==3.0.11 buildozer==1.5.0 python-for-android==2024.12.11 certifi
+          pip install Cython==3.0.11 buildozer==1.5.0 certifi
+          pip install git+https://github.com/kivy/python-for-android.git@v2024.12
 
       - name: Print versions
         run: |
           buildozer --version
           python -c "import Cython,certifi; print('Cython:',Cython.__version__,'certifi:',certifi.__version__)"
-          python -c "import pythonforandroid; print('P4A:',pythonforandroid.__version__)"
 
       - name: Check fonts folder
         run: |
@@ -71,7 +84,6 @@ jobs:
           name: bilipink-apk
           path: bin/*.apk
 
-      # ✅失败也捞日志（以后炸了直接看）
       - name: Upload buildozer log (always run)
         if: always()
         uses: actions/upload-artifact@v4
