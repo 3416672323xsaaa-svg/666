@@ -20,4 +20,3 @@ fullscreen = 0
 [buildozer]
 log_level = 2
 warn_on_root = 0
-android.sdk_path = ${{ github.workspace }}/android-sdk
