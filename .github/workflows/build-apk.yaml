@@ -1,4 +1,4 @@
-name: BiliPink_Bypass_Bug
+name: BiliPink_Final_NoMoreBug
 on:
   push:
     branches: [ main ]
@@ -19,19 +19,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Python3.11.10
+      - name: Setup Python 3.11.10
         uses: actions/setup-python@v7
         with:
           python-version: '3.11.10'
           architecture: x64
 
-      - name: JDK17
+      - name: Setup JDK 17
         uses: actions/setup-java@v6
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Wipe everything old
+      - name: WIPE ALL OLD TRASH
         run: |
           set -e
           rm -rf ./bin ./build ./__pycache__
@@ -42,31 +42,39 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/.buildozer
-          key: bilipink-bypass-final-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-realfinal-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-bypass-final-
+            bilipink-realfinal-
 
-      - name: Install system
+      - name: Install system dependencies
         run: |
           sudo apt update -y
           sudo apt -y install automake libltdl-dev zip unzip git pkg-config libffi-dev libssl-dev autoconf libtool cmake ant wget
 
-      - name: Pip install
+      - name: Install python packages
         run: |
           python -m pip install --upgrade pip setuptools
           pip install Cython==0.29.37 buildozer==1.6.0 certifi
 
-      - name: Download cmdline-tools + FAKE 'tools' folder TO FOOL BUILDOZER【核心欺骗】
+      - name: Prepare SDK (temp folder + fake tools copy)
         run: |
           set -e
           cd $SDK_ROOT
+          # 下载到当前SDK根目录
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-${{ env.CMDLINE_TOOLS_VER }}_latest.zip
-          unzip -q commandlinetools-linux-${{ env.CMDLINE_TOOLS_VER }}_latest.zip
-          mkdir -p $SDK_ROOT/cmdline-tools
-          mv cmdline-tools $SDK_ROOT/cmdline-tools/latest
-          # 最关键！复制一份并重命名成 buildozer 硬编码死要的 tools！！
-          cp -r $SDK_ROOT/cmdline-tools/latest $SDK_ROOT/tools
+          # 先解压到临时tmp文件夹，彻底避开名字冲突！！！
+          mkdir tmp
+          cd tmp
+          unzip -q ../commandlinetools-linux-${{ env.CMDLINE_TOOLS_VER }}_latest.zip
+          # tmp里面得到cmdline-tools，把它移出去叫latest
+          mv cmdline-tools $SDK_ROOT/cmdline-tools
+          cd $SDK_ROOT
+          rm -rf tmp
+          mv cmdline-tools cmdline-tools/latest
+          # 最关键！复制一份，名字=tools，专门哄buildozer！！不是mv！是cp！
+          cp -r cmdline-tools/latest tools
 
+          # 写入全部许可
           mkdir -p $SDK_ROOT/licenses
           echo -n "24333f8a63b6825ea9c5514f83c2829b009d1fee" > $SDK_ROOT/licenses/android-sdk-license
           echo -n "84831b9409646a918e30573bab4c9c91346d8abd" > $SDK_ROOT/licenses/android-sdk-preview-license
@@ -79,7 +87,7 @@ jobs:
           echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
           echo "$SDK_ROOT/tools/bin" >> $GITHUB_PATH
 
-      - name: Pre‑run sdkmanager accept (预先拉好基础包，防止buildozer重新下载SDK)
+      - name: Pre‑download SDK components
         run: |
           set -e
           yes | sdkmanager --sdk_root=$SDK_ROOT "platform-tools" "platforms;android-33" "build-tools;33.0.2"
