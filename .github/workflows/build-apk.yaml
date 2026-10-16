@@ -44,12 +44,8 @@ jobs:
             pkg-config zlib1g-dev \
             libncurses5-dev libncursesw5-dev \
             cmake ccache libffi-dev libssl-dev \
-            libltdl-dev gettext patch wget
-
-      - name: Install Python build tools
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install "Cython==0.29.34" "buildozer==1.5.0"
+            libltdl-dev gettext patch wget curl \
+            file
 
       - name: Check required files
         run: |
@@ -59,6 +55,91 @@ jobs:
           test -f bili_api.py
           test -f downloader.py
           echo "All required project files exist."
+
+      # Download the Android ARM64 FFmpeg binary.
+      - name: Prepare Android ARM64 FFmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p assets
+          mkdir -p /tmp/ffmpeg-extract
+
+          URL="https://github.com/MPDL-Official/ffmpeg-android-build/releases/latest/download/ffmpeg-android-arm64-v8a.tar.gz"
+
+          echo "Downloading Android ARM64 FFmpeg..."
+          curl -fL --retry 3 --connect-timeout 30 \
+            "$URL" \
+            -o /tmp/ffmpeg.tar.gz
+
+          echo "Checking archive..."
+          tar -tzf /tmp/ffmpeg.tar.gz >/dev/null
+
+          tar -xzf /tmp/ffmpeg.tar.gz \
+            -C /tmp/ffmpeg-extract
+
+          FFMPEG_PATH="$(find /tmp/ffmpeg-extract \
+            -type f -name ffmpeg -print -quit)"
+
+          if [ -z "$FFMPEG_PATH" ]; then
+            echo "::error::FFmpeg executable was not found in the archive."
+            find /tmp/ffmpeg-extract -maxdepth 4 -type f
+            exit 1
+          fi
+
+          install -m 755 "$FFMPEG_PATH" assets/ffmpeg
+
+          echo "Checking architecture..."
+          file assets/ffmpeg
+          ls -lh assets/ffmpeg
+
+          # Ensure the binary is included as an Android application asset.
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("buildozer.spec")
+          text = path.read_text(encoding="utf-8")
+
+          asset_line = "android.add_assets = assets/ffmpeg:ffmpeg"
+
+          if re.search(
+              r"(?m)^\s*android\.add_assets\s*=",
+              text
+          ):
+              text = re.sub(
+                  r"(?m)^\s*android\.add_assets\s*=.*$",
+                  asset_line,
+                  text,
+                  count=1
+              )
+          else:
+              match = re.search(r"(?m)^\[app\]\s*$", text)
+              if not match:
+                  raise SystemExit(
+                      "Could not find [app] section in buildozer.spec"
+                  )
+
+              insert_at = match.end()
+              text = (
+                  text[:insert_at]
+                  + "\n"
+                  + asset_line
+                  + text[insert_at:]
+              )
+
+          path.write_text(text, encoding="utf-8")
+          print("Added FFmpeg asset mapping to buildozer.spec.")
+          PY
+
+          echo "FFmpeg asset preparation completed."
+
+      - name: Install Python build tools
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install \
+            "Cython==0.29.34" \
+            "buildozer==1.5.0"
 
       - name: Install automatic startup diagnostics
         run: |
@@ -150,12 +231,11 @@ jobs:
                           scroll.add_widget(label)
                           content.add_widget(scroll)
 
-                          popup = Popup(
+                          Popup(
                               title="启动诊断",
                               content=content,
                               size_hint=(0.94, 0.82)
-                          )
-                          popup.open()
+                          ).open()
                       except Exception as exc:
                           _write("Diagnostic popup failed: " + repr(exc))
 
@@ -192,6 +272,7 @@ jobs:
           def install_kivy_logging():
               try:
                   from kivy.logger import Logger
+
                   file_handler = logging.FileHandler(
                       LOG_PATH, encoding="utf-8"
                   )
@@ -218,12 +299,16 @@ jobs:
 
           path = Path("main.py")
           source = path.read_text(encoding="utf-8")
-          lines = source.splitlines(keepends=True)
 
           if "import startup_diagnostics" not in source:
+              lines = source.splitlines(keepends=True)
               index = 0
 
-              if lines and "coding" in lines[0] and lines[0].startswith("#"):
+              if (
+                  lines
+                  and lines[0].startswith("#")
+                  and "coding" in lines[0]
+              ):
                   index = 1
 
               while index < len(lines) and not lines[index].strip():
@@ -234,25 +319,26 @@ jobs:
                   or lines[index].lstrip().startswith("'''")
               ):
                   quote = lines[index].lstrip()[:3]
-                  if lines[index].count(quote) >= 2:
-                      index += 1
-                  else:
-                      index += 1
-                      while index < len(lines):
-                          if quote in lines[index]:
-                              index += 1
-                              break
+                  index += 1
+                  while index < len(lines):
+                      if quote in lines[index]:
                           index += 1
+                          break
+                      index += 1
 
               lines.insert(index, "\nimport startup_diagnostics\n")
               source = "".join(lines)
 
-          if "startup_diagnostics.install_kivy_logging()" not in source:
+          if (
+              "startup_diagnostics.install_kivy_logging()"
+              not in source
+          ):
               marker = "from bili_api import"
               if marker not in source:
                   raise SystemExit(
                       "Cannot locate bili_api import in main.py"
                   )
+
               source = source.replace(
                   marker,
                   "startup_diagnostics.install_kivy_logging()\n\n"
@@ -286,6 +372,7 @@ jobs:
         if: always()
         run: |
           mkdir -p bin
+
           if compgen -G "bin/*.apk" > /dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Generated APK files:"
@@ -309,7 +396,11 @@ jobs:
           from pathlib import Path
 
           log_path = Path("build.log")
-          raw = log_path.read_text(errors="replace") if log_path.exists() else ""
+          raw = (
+              log_path.read_text(errors="replace")
+              if log_path.exists()
+              else ""
+          )
           raw = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', raw)
           lines = raw.splitlines()
 
@@ -329,8 +420,10 @@ jobs:
 
           report = [
               "BiliPink automatic build report",
-              "Build outcome: " + os.environ.get("BUILD_OUTCOME", "unknown"),
-              "APK exists: " + os.environ.get("APK_EXISTS", "unknown"),
+              "Build outcome: "
+                  + os.environ.get("BUILD_OUTCOME", "unknown"),
+              "APK exists: "
+                  + os.environ.get("APK_EXISTS", "unknown"),
               "Build log lines: " + str(len(lines)),
               "Matching error lines: " + str(len(hits)),
               ""
@@ -339,7 +432,9 @@ jobs:
           for apk in glob.glob("bin/*.apk"):
               report.append("APK: " + apk)
               try:
-                  report.append("APK size: " + str(os.path.getsize(apk)))
+                  report.append(
+                      "APK size: " + str(os.path.getsize(apk))
+                  )
                   with zipfile.ZipFile(apk) as archive:
                       names = archive.namelist()
                       report.append("APK ZIP integrity: OK")
@@ -348,11 +443,21 @@ jobs:
                           + str("AndroidManifest.xml" in names)
                       )
                       report.append(
+                          "FFmpeg asset present: "
+                          + str(any(
+                              name.endswith("/ffmpeg")
+                              or name == "assets/ffmpeg"
+                              for name in names
+                          ))
+                      )
+                      report.append(
                           "Native libraries: "
                           + str(sum(n.endswith(".so") for n in names))
                       )
               except Exception as exc:
-                  report.append("APK inspection error: " + repr(exc))
+                  report.append(
+                      "APK inspection error: " + repr(exc)
+                  )
 
           report.append("")
           report.append("=== Error context ===")
@@ -363,6 +468,7 @@ jobs:
                   selected.update(
                       range(max(0, i - 3), min(len(lines), i + 6))
                   )
+
               previous = -2
               for i in sorted(selected):
                   if i > previous + 1:
@@ -378,14 +484,14 @@ jobs:
 
           report.append("")
           report.append(
-              "Startup diagnostic hook is bundled into the built source."
-          )
-          report.append(
-              "Runtime errors on the phone are separate from build-time errors."
+              "Runtime FFmpeg extraction and invocation must also "
+              "be implemented in the app."
           )
 
           result = "\n".join(report) + "\n"
-          Path("failure-report.txt").write_text(result, encoding="utf-8")
+          Path("failure-report.txt").write_text(
+              result, encoding="utf-8"
+          )
 
           print("========== BILIPINK AUTOMATIC REPORT ==========")
           print(result)
@@ -422,6 +528,6 @@ jobs:
           if [ "$BUILD_OUTCOME" = "success" ] && [ "$APK_EXISTS" = "true" ]; then
             echo "BiliPink APK build succeeded."
           else
-            echo "::error::Build failed or APK is missing. Automatic diagnostics were printed above."
+            echo "::error::Build failed or APK is missing. See diagnostics artifact."
             exit 1
           fi
