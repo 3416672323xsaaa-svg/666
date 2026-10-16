@@ -34,7 +34,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
 
       - name: Install Android build dependencies
         run: |
@@ -44,7 +43,6 @@ jobs:
             git \
             zip \
             unzip \
-            openjdk-17-jdk \
             autoconf \
             automake \
             autopoint \
@@ -69,7 +67,7 @@ jobs:
           python -m pip install "Cython==0.29.34"
           python -m pip install "buildozer==1.5.0"
 
-      - name: Check required project files
+      - name: Check project files
         run: |
           set -eu
           test -f buildozer.spec
@@ -77,7 +75,7 @@ jobs:
           test -f bili_api.py
           test -f downloader.py
 
-          echo "Required Python files are present."
+          echo "Required project files are present."
           echo "Python version:"
           python --version
           echo "Java version:"
@@ -90,29 +88,32 @@ jobs:
           set -o pipefail
           buildozer -v android debug 2>&1 | tee build.log
 
-      - name: Create short failure report
+      - name: Create failure report
         if: steps.build.outcome == 'failure'
         run: |
           python - <<'PY'
           import re
           from pathlib import Path
 
-          log = Path("build.log")
-          text = log.read_text(errors="replace") if log.exists() else ""
+          log_path = Path("build.log")
+          content = log_path.read_text(
+              encoding="utf-8", errors="replace"
+          ) if log_path.exists() else ""
 
-          # 去除终端颜色控制字符，让日志更容易阅读
-          text = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', text)
-          lines = text.splitlines()
+          content = re.sub(
+              r'\x1b\[[0-9;]*[A-Za-z]', '', content
+          )
+          lines = content.splitlines()
 
           keywords = (
-              "error:", "error ", "fatal error",
-              "traceback", "command failed",
-              "exception:", "out of memory",
-              "no space left", "killed",
-              "failed with", "not found"
+              "error:", "fatal error", "traceback",
+              "command failed", "exception:",
+              "out of memory", "no space left",
+              "killed", "failed with", "not found",
+              "undefined reference"
           )
 
-          hits = [
+          matches = [
               i for i, line in enumerate(lines)
               if any(word in line.lower() for word in keywords)
           ]
@@ -120,32 +121,31 @@ jobs:
           report = [
               "BiliPink APK 构建失败报告",
               f"完整日志行数：{len(lines)}",
-              "",
-              "=== 错误附近的日志 ===",
               ""
           ]
 
-          if hits:
+          if matches:
               selected = set()
-              for i in hits:
-                  selected.update(range(max(0, i - 5), min(len(lines), i + 9)))
+              for i in matches:
+                  selected.update(
+                      range(max(0, i - 5), min(len(lines), i + 9))
+                  )
 
+              report.append("=== 错误附近的日志 ===")
               previous = -2
+
               for i in sorted(selected):
                   if i > previous + 1:
                       report.append("...省略...")
                   report.append(f"{i + 1}: {lines[i]}")
                   previous = i
           else:
-              report.extend([
-                  "没有识别到常见错误关键词。",
-                  "",
-                  "=== 日志末尾 160 行 ===",
-                  *[
-                      f"{i + 1}: {line}"
-                      for i, line in enumerate(lines[-160:], start=max(0, len(lines) - 160))
-                  ]
-              ])
+              report.append("未识别到常见错误关键词。")
+              report.append("=== 日志末尾 200 行 ===")
+              start = max(0, len(lines) - 200)
+
+              for i in range(start, len(lines)):
+                  report.append(f"{i + 1}: {lines[i]}")
 
           Path("failure-report.txt").write_text(
               "\n".join(report) + "\n",
@@ -173,8 +173,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Fail workflow if APK build failed
+      - name: Mark build as failed
         if: steps.build.outcome == 'failure'
         run: |
-          echo "APK build failed. Download BiliPink-build-error-report from this run's Artifacts."
+          echo "APK build failed."
+          echo "Download BiliPink-build-error-report from Artifacts."
           exit 1
