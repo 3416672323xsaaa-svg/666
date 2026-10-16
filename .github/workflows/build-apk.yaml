@@ -58,21 +58,13 @@ jobs:
           python -m pip install --upgrade pip setuptools
           pip install Cython==0.29.37 buildozer==1.6.0 certifi
 
-      - name: Fully download Android SDK & NDK (等待全部下完)
-        run: buildozer android sdk_download
-
-      - name: Accept all SDK Licenses（带多层容错）
+      - name: Pre‑create SDK license files（绕过sdkmanager！）
         run: |
-          SDK=$(buildozer android sdk_path)
-          TOOL1="${SDK}/cmdline-tools/latest/bin/sdkmanager"
-          TOOL2="${SDK}/cmdline-tools/bin/sdkmanager"
-          if [ -f "$TOOL1" ]; then
-            yes | $TOOL1 --licenses >/dev/null 2>&1 || true
-          elif [ -f "$TOOL2" ]; then
-            yes | $TOOL2 --licenses >/dev/null 2>&1 || true
-          else
-            echo "sdkmanager暂时找不到，交给buildozer内置授权处理"
-          fi
+          SDK_ROOT=~/.buildozer/android/platform/android-sdk
+          mkdir -p $SDK_ROOT/licenses
+          echo -n "24333f8a63b6825ea9c5514f83c2829b009d1fee" > $SDK_ROOT/licenses/android-sdk-license
+          echo -n "84831b9409646a918e30573bab4c9c91346d8abd" > $SDK_ROOT/licenses/android-sdk-preview-license
+          echo -n "d975f7516a7b320925b521d9642f1347f98d40fe" > $SDK_ROOT/licenses/google-gdk-license
 
       - name: Version print
         run: |
