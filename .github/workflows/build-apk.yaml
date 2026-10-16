@@ -16,7 +16,6 @@ env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
   CYTHON_LANGUAGE_LEVEL: '3'
-  BUILDOZER_ANDROID_SDK: ${{ github.workspace }}/android-sdk
 
 jobs:
   build-apk:
@@ -65,7 +64,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Prepare folders + ALL license hashes pre‑written
+      - name: Prepare folders + ALL license hashes (NO yes pipe!)
         shell: bash
         run: |
           set -e
@@ -91,28 +90,30 @@ jobs:
           rm -f commandline-tools.zip
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
-      - name: Install ONLY exactly what we need
+      - name: Install ONLY exactly what we need ❗REMOVED yes |
         shell: bash
         run: |
           set -e
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          yes | sdkmanager --sdk_root="$ANDROID_HOME" \
+          # 不使用yes！哈希已经全部写好；--no_https关掉不必要校验；严格指定三件套
+          sdkmanager --sdk_root="$ANDROID_HOME" --verbose \
             "platform-tools" \
             "platforms;android-33" \
             "build-tools;33.0.2"
 
           rm -rf "$ANDROID_HOME/build-tools/37.0.0"
+          rm -rf "$ANDROID_HOME/platforms/android-13"
           ls -la "$ANDROID_HOME/build-tools/"
 
-      - name: Cache SDK + Buildozer (key v13r1)
+      - name: Cache SDK + Buildozer (KEY v14 — MUST CLEAR OLD CACHE!)
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v13r1-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v14-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v13r1-${{ runner.os }}-
+            bilipink-sdk-v14-${{ runner.os }}-
 
       - name: Install Python packages & p4a develop
         shell: bash
