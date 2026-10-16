@@ -29,16 +29,23 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: ✅自动清理全部旧build残留 + 释放内存（代替手动删缓存）
+      - name: ✅安全清理（不再乱删 /tmp/*！只清自己的）
         shell: bash
         run: |
-          set -e
-          echo "=== Wipe old buildozer / SDK / temp ==="
+          set +e
+          echo "Wipe self-owned build artifacts"
           rm -rf "$HOME/.buildozer"
           rm -rf "$ANDROID_HOME"
-          rm -rf /tmp/*
           rm -rf ~/.cache/*
+          # 只清当前用户自己在/tmp下的文件，不碰系统私有
+          find /tmp -maxdepth 1 -user $USER -delete 2>/dev/null
+          # 开2G swap救内存（非常关键！缓解OOM）
+          sudo fallocate -l 2G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
           free -h
+          set -e
 
       - name: Install system dependencies
         shell: bash
@@ -91,7 +98,7 @@ jobs:
           ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
-      - name: Install exact SDK + NDK r25.2.9519653 + sync to buildozer folder
+      - name: Install exact SDK + NDK r25.2.9519653 + sync
         shell: bash
         run: |
           set -e
@@ -102,7 +109,6 @@ jobs:
           cp -r "$ANDROID_HOME"/. "$BUI_SDK/"
           mkdir -p "$BUI_SDK/tools/bin"
           ln -sf "$BUI_SDK/cmdline-tools/latest/bin/sdkmanager" "$BUI_SDK/tools/bin/sdkmanager"
-          echo "=== Memory after SDK install ==="
           free -h
 
       - name: Install locked pip + fixed p4a commit
@@ -113,7 +119,7 @@ jobs:
           python -m pip install 'Cython==3.0.11' 'buildozer==1.5.0' certifi
           python -m pip install git+https://github.com/kivy/python-for-android.git@5311828
 
-      - name: Final free memory check
+      - name: Memory status before build
         shell: bash
         run: |
           free -h
