@@ -10,6 +10,7 @@ env:
   PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
   P4A_USE_CERTIFI: 1
   P4A_ALLOW_TLS_13: 1
+  PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
 
 jobs:
   build-apk:
@@ -33,6 +34,7 @@ jobs:
         run: |
           rm -rf ~/.buildozer
           mkdir -p ~/.buildozer
+
       - name: Cache fresh Buildozer SDK & NDK
         uses: actions/cache@v4
         with:
@@ -44,21 +46,35 @@ jobs:
         run: |
           sudo apt update -y
           sudo apt -y install automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf
+
       - name: Install python packages
         run: |
           python -m pip install --upgrade pip
-          pip install Cython==3.0.11 buildozer==1.5.0 certifi
+          pip install Cython==3.0.11 buildozer==1.6.1 certifi
+
+      - name: Pre‑deploy NDK‑25b（清华镜像 + 改名适配buildozer1.6.1）
+        run: |
+          cd ~/.buildozer/android/platform
+          wget -q https://mirrors.tuna.tsinghua.edu.cn/android/ndk/android-ndk-r25b-linux.zip
+          unzip -q android-ndk-r25b-linux.zip
+          mv android-ndk-r25b android-ndk-25b
+          rm -f android-ndk-r25b-linux.zip
+          ls -la
+
       - name: Print versions
         run: |
           buildozer --version
           python -c "import Cython,certifi; print('Cython:',Cython.__version__,'certifi:',certifi.__version__)"
+
       - name: Check fonts folder
         run: |
           if [ ! -d "./fonts" ]; then echo "::warning file=buildozer.spec::fonts文件夹缺失，中文图标会方框！"; fi
           ls -la ./fonts || true
+
       - name: Build APK
         run: |
           buildozer android debug
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
