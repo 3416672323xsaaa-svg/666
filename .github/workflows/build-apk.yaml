@@ -20,7 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ✅ swap放到工作区！再也不动 / 目录！不会权限报错！
       - name: Enable Swap
         run: |
           SWAPIMG="${GITHUB_WORKSPACE}/swap.img"
@@ -41,15 +40,16 @@ jobs:
           python-version: '3.11'
 
       - name: Java17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
+      # ✅重点！不再硬锁不存在的p4a版本！只锁cython+buildozer
       - name: Pip install fixed
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir Cython==3.0.11 buildozer==1.5.0 python-for-android==2024.05.20
+          python -m pip install --no-cache-dir Cython==3.0.11 buildozer==1.5.0
 
       - name: Pre‑fetch SDK+NDK + trick buildozer path
         run: |
