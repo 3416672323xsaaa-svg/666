@@ -1,84 +1,66 @@
 name: Android Build BiliPink
+
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 env:
-  ANDROID_HOME: ${{github.workspace}}/android-sdk
-  ANDROID_SDK_ROOT: ${{github.workspace}}/android-sdk
-  NDK_ROOT: ${{github.workspace}}/android-ndk-r28c
-  _JAVA_OPTIONS: -Xmx2200M
-  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
+  P4A_USE_CERTIFI: 1
+  P4A_ALLOW_TLS_13: 1
 
 jobs:
   build-apk:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 220
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v7
 
-      - name: Swap (workspace)
-        run: |
-          SWAPIMG="${GITHUB_WORKSPACE}/swap.img"
-          rm -f "$SWAPIMG" || true
-          dd if=/dev/zero of="$SWAPIMG" bs=1M count=2048 status=none
-          chmod 600 "$SWAPIMG"
-          sudo swapon "$SWAPIMG" || true
-
-      - name: Install system deps
-        run: |
-          sudo apt update -qq
-          sudo apt install -qq -y wget unzip zip openjdk-17-jdk git build-essential autoconf automake cmake libffi-dev pkg-config zlib1g-dev gettext autopoint ant
-
-      - name: Setup Python3.11
-        uses: actions/setup-python@v5
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
-      - name: Setup Java17
-        uses: actions/setup-java@v5
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v6
         with:
-          distribution: temurin
           java-version: '17'
+          distribution: 'temurin'
 
-      - name: Pip install
+      - name: 💥 Purge old buildozer cache FIRST（强制清旧缓存）
+        run: |
+          rm -rf ~/.buildozer
+          mkdir -p ~/.buildozer
+      - name: Cache fresh Buildozer SDK & NDK
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          key: bilipink-auto-${{ github.sha }}
+          # ⚠️用 commit hash 当 key：每一次提交自动全新一套缓存，完全不会吃旧脏数据
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update -y
+          sudo apt -y install automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf
+      - name: Install python packages
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir Cython==3.0.11 buildozer==1.5.0
-
-      # ===全部SDK+NDK下载到workspace！不走~/.buildozer！buildozer无权删除这里！！===
-      - name: Pre‑download SDK & NDK (mirror)
+          pip install Cython==3.0.11 buildozer==1.5.0 certifi
+      - name: Print versions
         run: |
-          mkdir -p $ANDROID_HOME/licenses
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" > $ANDROID_HOME/licenses/android-sdk-preview-license
-
-          mkdir -p $ANDROID_HOME/cmdline-tools
-          cd $ANDROID_HOME/cmdline-tools
-          wget --tries=5 --timeout=300 https://github.com/AndroidToolsDL/cmdline-tools/raw/main/commandlinetools-linux-11076708_latest.zip
-          unzip -q commandlinetools-linux-11076708_latest.zip
-          mv cmdline-tools latest
-          rm commandlinetools-linux-11076708_latest.zip
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-
-          # NDK r28c！就是日志推荐的版本！镜像包不走google直连！
-          cd $GITHUB_WORKSPACE
-          wget --tries=5 --timeout=300 https://github.com/AndroidToolsDL/android-ndk/raw/main/android-ndk-r28c-linux.zip
-          unzip -q android-ndk-r28c-linux.zip
-          rm android-ndk-r28c-linux.zip
-
-      # ⚠️重点！buildozer命令显式给路径！并且关闭它自动安装平台！
-      - name: Build APK (force pass sdk ndk path)
+          buildozer --version
+          python -c "import Cython,certifi; print('Cython:',Cython.__version__,'certifi:',certifi.__version__)"
+      - name: Check fonts folder
         run: |
-          buildozer android debug \
-            --no-auto-download \
-            --android-sdk $ANDROID_HOME \
-            --android-ndk $NDK_ROOT
-
-      - name: Upload artifact
+          if [ ! -d "./fonts" ]; then echo "::warning file=buildozer.spec::fonts文件夹缺失，中文图标会方框！"; fi
+          ls -la ./fonts || true
+      - name: Build APK
+        run: |
+          buildozer android debug
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: BiliPink-APK
+          name: bilipink-apk
           path: bin/*.apk
