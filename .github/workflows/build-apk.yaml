@@ -7,11 +7,14 @@ on:
     branches: [ main ]
 
 env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  PYTHONIOENCODING: utf-8
   PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
   P4A_USE_CERTIFI: 1
   P4A_ALLOW_TLS_13: 1
-  # 强制全局锁3.11，避免系统3.14窜进来
   P4A_HOST_PYTHON_VERSION: "3.11"
+  JAVA_HOME: ${{ steps.java.outputs.path }}
 
 jobs:
   build-apk:
@@ -20,53 +23,65 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v7
 
-      - name: Setup Python EXACT 3.11.10
+      - name: Setup Python exactly 3.11.10
         uses: actions/setup-python@v7
         with:
           python-version: '3.11.10'
           architecture: x64
 
-      - name: Setup Java 17 (Temurin)
+      - name: Setup Java 17 Temurin
+        id: java
         uses: actions/setup-java@v6
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 💥 Purge old buildozer cache
+      - name: Purge stale local artifacts
         run: |
-          rm -rf ~/.buildozer
-          mkdir -p ~/.buildozer
+          rm -rf ./bin ./build ./__pycache__
+          rm -rf ~/.buildozer/.last_buildozer_check
 
-      - name: Cache Buildozer
+      - name: Cache Buildozer SDK & distributions
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: bilipink-v2-${{ github.sha }}
+          key: bilipink‑build‑v03‑${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            bilipink‑build‑v03‑
 
-      - name: Install system libs
+      - name: Install full system dependencies
         run: |
           sudo apt update -y
-          sudo apt -y install automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf
+          sudo apt -y install automake libltdl-dev zip unzip git pkg-config \
+              libffi-dev libssl-dev autoconf libtool cmake
 
-      - name: Install Python packages（黄金配对）
+      - name: Install pip stack (黄金固定版本)
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools
           pip install Cython==0.29.37 buildozer==1.6.0 certifi
 
-      - name: Auto accept SDK licenses
+      - name: Buildozer bootstrap (download SDK/NDK silently)
         run: |
-          yes | ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true
+          buildozer android debug || true
 
-      - name: Verify python version（看输出必须是3.11.x）
+      - name: Accept all SDK Licenses (auto detect sdk path)
+        run: |
+          SDK=$(buildozer android sdk_path)
+          TOOL="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ -f "$TOOL" ]; then
+            yes | $TOOL --licenses >/dev/null 2>&1 || true
+          fi
+
+      - name: Version check
         run: |
           python --version
           buildozer --version
 
-      - name: Build APK
+      - name: Build final APK
         run: |
           buildozer android debug
 
-      - name: Upload APK
+      - name: Upload built APK
         uses: actions/upload-artifact@v4
         with:
           name: bilipink-apk
