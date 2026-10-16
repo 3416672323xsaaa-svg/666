@@ -1,66 +1,81 @@
-name: BiliPink_BUILD
+name: Build BiliPink APK
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
 
-    container:
-      image: ghcr.io/kivy/buildozer:latest
+    env:
+      P4A_BOOTSTRAP: sdl2
+      CYTHON_LANGUAGE_LEVEL: "3"
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m"
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fix Git
-        run: |
-          git config --global --add safe.directory '*'
-
-      - name: Check project
-        run: |
-          echo "===== PROJECT ====="
-          ls -la
-          echo "===== PYTHON ====="
-          python3 --version
-          echo "===== BUILDOZER ====="
-          buildozer --version
-
-      - name: Clean old build
-        run: |
-          rm -rf .buildozer
-          rm -rf bin
-
-      - name: Build APK
-        run: |
-          mkdir -p build-log
-          set -o pipefail
-          buildozer android debug --log-level 2 2>&1 | tee build-log/build.log
-
-      - name: Show failure tail
-        if: failure()
-        run: |
-          echo "=============================="
-          echo "LAST 300 LINES"
-          echo "=============================="
-          tail -n 300 build-log/build.log || true
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          name: BiliPink_build_log
-          path: build-log/build.log
-          if-no-files-found: warn
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            git \
+            zip \
+            unzip \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo6 \
+            cmake \
+            ccache \
+            libffi-dev \
+            libssl-dev \
+            libltdl-dev
+
+      - name: Install Buildozer
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install "Cython==0.29.36" "buildozer==1.5.0"
+
+      - name: Check project files
+        run: |
+          test -f buildozer.spec
+          test -f main.py
+          test -f bili_api.py
+          test -f downloader.py
+          echo "Project files found."
+
+      - name: Build debug APK
+        run: |
+          buildozer -v android debug
 
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: BiliPink_APK
+          name: BiliPink-debug-APK
           path: bin/*.apk
           if-no-files-found: error
