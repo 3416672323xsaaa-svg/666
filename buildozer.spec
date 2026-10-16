@@ -3,8 +3,9 @@ title = BiliPink
 package.name = bilipink
 package.domain = org.bilipink
 source.dir = .
-source.include_exts = py,png,jpg,jpeg,kv,json,ttf,otf,xml,txt
-source.include_patterns = fonts/*
+source.include_exts = py,kv,json
+# 资源完全交给 android.add_assets；这里只抓源码，不带任何资源
+source.include_patterns =
 source.exclude_dirs = .git,.github,bin,.buildozer,__pycache__
 version = 1.1.0
 orientation = portrait
@@ -22,8 +23,9 @@ android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.enable_androidx = True
 
-# 单独映射：本地fonts → APK assets/fonts（这才是真正负责注入assets的行）
-android.add_assets = fonts:assets/fonts
+# ⚠️文件级映射！只把 fonts/NotoSansSC‑Regular.otf → assets/fonts/NotoSansSC‑Regular.otf
+# avatar-reference.jpg 完全没写，就不会进assets
+android.add_assets = fonts/NotoSansSC-Regular.otf:assets/fonts/NotoSansSC-Regular.otf
 
 p4a.extra_args = --use-certifi
 p4a.branch = v2024.01.21
