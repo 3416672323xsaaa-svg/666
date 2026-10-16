@@ -1,92 +1,181 @@
 name: Android Build BiliPink
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+push:
+branches: [ main ]
+pull_request:
+branches: [ main ]
+workflow_dispatch:
 
 env:
-  PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
-  P4A_USE_CERTIFI: 0
-  P4A_ALLOW_TLS_13: 1
-  ANDROID_HOME: ${{ github.workspace }}/android-sdk
-  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: '0'
+P4A_USE_CERTIFI: '0'
+P4A_ALLOW_TLS_13: '1'
+ANDROID_HOME: ${{ github.workspace }}/android-sdk
+ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+CYTHON_LANGUAGE_LEVEL: '3'
 
 jobs:
-  build-apk:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v7
+build-apk:
+runs-on: ubuntu-22.04
+timeout-minutes: 150
 
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
+steps:
+  - name: Checkout source code
+    uses: actions/checkout@v4
 
-      - name: Setup Java 17 (Temurin)
-        uses: actions/setup-java@v6
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+  - name: Setup Python 3.11
+    uses: actions/setup-python@v5
+    with:
+      python-version: '3.11'
 
-      - name: 💥 Purge old buildozer cache FIRST
-        run: |
-          rm -rf ~/.buildozer
-          mkdir -p ~/.buildozer
-          rm -rf $ANDROID_HOME
+  - name: Setup Java 17
+    uses: actions/setup-java@v4
+    with:
+      java-version: '17'
+      distribution: 'temurin'
 
-      - name: Download Android SDK Command‑line Tools & Accept ALL Licenses
-        run: |
-          mkdir -p $ANDROID_HOME/cmdline-tools
-          cd $ANDROID_HOME/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076798_latest.zip
-          unzip -q commandlinetools-linux-11076798_latest.zip
-          mv cmdline-tools latest || true
-          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;37.0.0" "platforms;android-33" "platform-tools"
+  - name: Purge old buildozer cache
+    run: |
+      rm -rf ~/.buildozer
+      mkdir -p ~/.buildozer
+      rm -rf "$ANDROID_HOME"
 
-      - name: Cache fresh Buildozer SDK & NDK
-        uses: actions/cache@v4
-        with:
-          path: [~/.buildozer, ${{ github.workspace }}/android-sdk]
-          key: bilipink-fixed-sdk-${{ github.sha }}
+  - name: Download Android SDK and accept licenses
+    shell: bash
+    run: |
+      set -euo pipefail
+      mkdir -p "$ANDROID_HOME/cmdline-tools"
+      cd "$ANDROID_HOME/cmdline-tools"
 
-      - name: Install system dependencies
-        run: |
-          sudo apt update -y
-          sudo apt -y install automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf
+      wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076798_latest.zip
+      unzip -q commandlinetools-linux-11076798_latest.zip
+      mv cmdline-tools latest
 
-      - name: Install fixed python packages
-        run: |
-          python -m pip install --upgrade pip
-          pip install Cython==3.0.11 buildozer==1.5.0 certifi
-          pip install git+https://github.com/kivy/python-for-android.git@v2024.12
+      yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+        --sdk_root="$ANDROID_HOME" --licenses
 
-      - name: Print versions
-        run: |
-          buildozer --version
-          python -c "import Cython,certifi; print('Cython:',Cython.__version__,'certifi:',certifi.__version__)"
+      "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+        --sdk_root="$ANDROID_HOME" \
+        "build-tools;33.0.2" \
+        "platforms;android-33" \
+        "platform-tools"
 
-      - name: Check fonts folder
-        run: |
-          if [ ! -d "./fonts" ]; then echo "::warning file=buildozer.spec::fonts文件夹缺失，中文图标会方框！"; fi
-          ls -la ./fonts || true
+  - name: Cache SDK and buildozer
+    uses: actions/cache@v4
+    with:
+      path: |
+        ~/.buildozer
+        ${{ github.workspace }}/android-sdk
+      key: bilipink-sdk-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+      restore-keys: |
+        bilipink-sdk-v4-${{ runner.os }}-
 
-      - name: Build APK
-        run: |
-          buildozer android debug
+  - name: Install system dependencies
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y \
+        automake \
+        libltdl-dev \
+        zip \
+        unzip \
+        openjdk-17-jdk \
+        git \
+        pkg-config \
+        libffi-dev \
+        libssl-dev \
+        autoconf \
+        build-essential \
+        cmake \
+        zlib1g-dev \
+        libncurses5-dev \
+        libncursesw5-dev \
+        libtinfo5 \
+        gettext \
+        autopoint
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: bilipink-apk
-          path: bin/*.apk
+  - name: Install Python packages
+    run: |
+      python -m pip install --upgrade pip setuptools wheel
+      python -m pip install \
+        'Cython==3.0.11' \
+        'buildozer==1.5.0' \
+        certifi
 
-      - name: Upload buildozer log (always run)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: buildozer-full-log
-          path: ~/.buildozer/build.log
+      python -m pip install \
+        'git+https://github.com/kivy/python-for-android.git@v2024.12'
+
+  - name: Print versions
+    run: |
+      buildozer --version
+      python -c "import Cython, certifi; print('Cython:', Cython.__version__, 'certifi:', certifi.__version__)"
+
+  - name: Check project files and fonts folder
+    shell: bash
+    run: |
+      set -e
+
+      test -f buildozer.spec
+      test -f main.py
+
+      echo "===== Project root ====="
+      ls -la
+
+      echo "===== Fonts folder ====="
+      if [ ! -d "./fonts" ]; then
+        echo "::error::fonts folder is missing from the repository root."
+        exit 1
+      fi
+
+      find ./fonts -maxdepth 2 -type f -print
+
+      FONT_COUNT="$(find ./fonts -type f \( \
+        -iname '*.otf' -o -iname '*.ttf' \
+        \) | wc -l)"
+
+      if [ "$FONT_COUNT" -eq 0 ]; then
+        echo "::error::No .otf or .ttf font found in fonts/."
+        exit 1
+      fi
+
+      echo "Found $FONT_COUNT font file(s)."
+
+  - name: Check Python syntax and UTF-8
+    run: |
+      python - <<'PY'
+      from pathlib import Path
+
+      for path in Path(".").glob("*.py"):
+          path.read_text(encoding="utf-8")
+          print("UTF-8 OK:", path)
+      PY
+
+      python -m py_compile main.py
+
+  - name: Build APK
+    env:
+      GRADLE_OPTS: >-
+        -Dorg.gradle.daemon=false
+        -Dorg.gradle.jvmargs=-Xmx2048m
+        -XX:MaxMetaspaceSize=512m
+    run: |
+      buildozer -v android debug
+
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: bilipink-apk
+      path: bin/*.apk
+      if-no-files-found: error
+      retention-days: 14
+
+  - name: Upload buildozer log
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: buildozer-full-log
+      path: |
+        ~/.buildozer/build.log
+        .buildozer/android/platform/build-*/dists/*/build.log
+      if-no-files-found: ignore
+      retention-days: 7
