@@ -1,5 +1,4 @@
-name: Android Build BiliPink
-
+name: BiliPink Build Final
 on:
   push:
     branches: [ main ]
@@ -10,72 +9,82 @@ env:
   LC_ALL: C.UTF-8
   LANG: C.UTF-8
   PYTHONIOENCODING: utf-8
-  PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
-  P4A_USE_CERTIFI: 1
-  P4A_ALLOW_TLS_13: 1
-  P4A_HOST_PYTHON_VERSION: "3.11"
+  CMDLINE_TOOLS_VER: 11076708
+  SDK_ROOT: ~/.buildozer/android/platform/android-sdk
+  P4A_SKIP_SDKMANAGER_CHECK: "1"
+  P4A_NO_SDK_AUTO_DOWNLOAD: "1"
 
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source code
+      - name: Checkout source
         uses: actions/checkout@v7
 
-      - name: Setup Python exactly 3.11.10
+      - name: Setup Python 3.11.10
         uses: actions/setup-python@v7
         with:
           python-version: '3.11.10'
           architecture: x64
 
-      - name: Setup Java 17 Temurin
-        id: java
+      - name: Setup JDK‑17 Temurin
         uses: actions/setup-java@v6
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Purge stale artifacts
+      - name: Purge leftover broken SDK
         run: |
           rm -rf ./bin ./build ./__pycache__
-          rm -rf ~/.buildozer/.last_buildozer_check
+          rm -rf ~/.buildozer/android/platform/android-sdk
+          mkdir -p ~/.buildozer/android/platform
 
-      - name: Cache Buildozer SDK
+      - name: Cache Buildozer
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: bilipink-build-v03-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-final-v1-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-build-v03-
+            bilipink-final-v1-
 
       - name: Install system packages
         run: |
           sudo apt update -y
-          sudo apt -y install automake libltdl-dev zip unzip git pkg-config libffi-dev libssl-dev autoconf libtool cmake
+          sudo apt -y install automake libltdl-dev zip unzip git pkg-config libffi-dev libssl-dev autoconf libtool cmake ant wget
 
-      - name: Install pip tools
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools
           pip install Cython==0.29.37 buildozer==1.6.0 certifi
 
-      - name: Pre‑create SDK license files（绕过sdkmanager！）
+      - name: Hard inject cmdline‑tools + all licenses【核心修复】
         run: |
-          SDK_ROOT=~/.buildozer/android/platform/android-sdk
+          mkdir -p $SDK_ROOT
+          mkdir -p $SDK_ROOT/cmdline-tools
+          cd $SDK_ROOT/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-${{ env.CMDLINE_TOOLS_VER }}_latest.zip
+          unzip -q commandlinetools-linux-${{ env.CMDLINE_TOOLS_VER }}_latest.zip
+          mv cmdline-tools latest
+          rm -f commandlinetools-linux-${{ env.CMDLINE_TOOLS_VER }}_latest.zip
+
           mkdir -p $SDK_ROOT/licenses
           echo -n "24333f8a63b6825ea9c5514f83c2829b009d1fee" > $SDK_ROOT/licenses/android-sdk-license
           echo -n "84831b9409646a918e30573bab4c9c91346d8abd" > $SDK_ROOT/licenses/android-sdk-preview-license
           echo -n "d975f7516a7b320925b521d9642f1347f98d40fe" > $SDK_ROOT/licenses/google-gdk-license
 
-      - name: Version print
-        run: |
-          python --version
-          buildozer --version
+          chmod -R u+x $SDK_ROOT/cmdline-tools/latest/bin
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
-      - name: Build APK
+      - name: Verify buildozer ok
+        run: buildozer --version
+
+      - name: Launch buildozer android debug
         run: buildozer android debug
 
-      - name: Upload APK
+      - name: Upload finished APK
         uses: actions/upload-artifact@v4
         with:
-          name: bilipink-apk
+          name: BiliPink‑APK
           path: bin/*.apk
