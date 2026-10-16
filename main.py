@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""BiliPink v2.3.5.foss | Kivy Android | Font extract from APK assets/fonts"""
+"""BiliPink v2.3.5.foss | Kivy Android | Font fix final"""
 import json, os, shutil, threading, urllib.request
 from datetime import datetime
 from kivy.app import App
@@ -33,7 +33,8 @@ GREEN = (0.30, 0.66, 0.40, 1)
 RED = (0.82, 0.25, 0.30, 1)
 BORDER = (0.90, 0.89, 0.90, 1)
 
-FONT = 'Roboto'
+FONT = None
+_FONT_LOADED = False
 
 
 def fmt_num(n):
@@ -94,7 +95,6 @@ class BiliPinkApp(App):
     title = 'BiliPink'
 
     def _extract_asset_to_file(self, asset_fullpath, dest_path):
-        """asset_fullpath = APK assets内部完整路径，例 fonts/NotoSansSC-Regular.otf"""
         if platform != 'android':
             local_p = os.path.abspath(asset_fullpath)
             if os.path.isfile(local_p):
@@ -119,7 +119,10 @@ class BiliPinkApp(App):
         except Exception:
             return None
 
-    def _load_cjk_font(self):
+    def _load_cjk_font_safe(self, dt):
+        global FONT, _FONT_LOADED
+        if _FONT_LOADED:
+            return
         try:
             from android.storage import app_storage_path
             cache_font_path = os.path.join(app_storage_path(), "NotoSansSC-Regular.otf")
@@ -135,10 +138,18 @@ class BiliPinkApp(App):
                     fn_italic=fp,
                     fn_bolditalic=fp
                 )
-                global FONT
                 FONT = "BiliCJK"
+                _FONT_LOADED = True
+                if self.page_name == 'home':
+                    self.show_home()
+                else:
+                    self.show_mine()
+            else:
+                FONT = "Roboto"
+                _FONT_LOADED = True
         except Exception:
-            pass
+            FONT = "Roboto"
+            _FONT_LOADED = True
 
     def _load_avatar(self):
         try:
@@ -153,7 +164,6 @@ class BiliPinkApp(App):
             return None
 
     def on_start(self):
-        self._load_cjk_font()
         self._load_history()
 
     def build(self):
@@ -172,14 +182,17 @@ class BiliPinkApp(App):
         self.nav = BoxLayout(size_hint_y=None, height=dp(66),
                              padding=[dp(36), dp(5), dp(36), dp(4)], spacing=dp(65))
         self.root_layout.add_widget(self.nav)
+
         self.show_home()
+        Clock.schedule_once(self._load_cjk_font_safe, 0.12)
         return self.root_layout
 
     def _label(self, text, size=14, color=TEXT, bold=False, halign='left', height=None):
         h = height or max(24, size * 1.75)
+        use_font = FONT if FONT is not None else "Roboto"
         w = Label(
             text=str(text),
-            font_name=FONT,
+            font_name=use_font,
             font_size=dp(size),
             color=color,
             bold=bold,
@@ -192,9 +205,10 @@ class BiliPinkApp(App):
         return w
 
     def _btn(self, text, cb, color=WHITE, fg=TEXT, height=dp(44), bold=False):
+        use_font = FONT if FONT is not None else "Roboto"
         b = Button(
             text=text,
-            font_name=FONT,
+            font_name=use_font,
             font_size=dp(14),
             bold=bold,
             background_normal='',
@@ -229,10 +243,10 @@ class BiliPinkApp(App):
             active = self.page_name == key
             c = PINK if active else (0.48, 0.48, 0.49, 1)
             box = BoxLayout(orientation='vertical', spacing=0)
-            btn = Button(text=icon, font_name=FONT, font_size=dp(29),
+            btn = Button(text=icon, font_name=FONT if FONT else "Roboto", font_size=dp(29),
                          background_normal='', background_color=(0, 0, 0, 0),
                          color=c, size_hint_y=0.62)
-            cap = Label(text=label, font_name=FONT, font_size=dp(12), color=c, size_hint_y=0.38)
+            cap = Label(text=label, font_name=FONT if FONT else "Roboto", font_size=dp(12), color=c, size_hint_y=0.38)
             btn.bind(on_release=lambda *a, k=key: goto(k))
             cap.bind(on_touch_down=lambda inst, touch, k=key: goto(k) if inst.collide_point(*touch.pos) else None)
             box.add_widget(btn)
@@ -263,7 +277,7 @@ class BiliPinkApp(App):
         if ava_p and os.path.isfile(ava_p):
             avatar = Image(source=ava_p, fit_mode='contain', size_hint_x=None, width=dp(48))
         else:
-            avatar = Label(text='▣', font_name=FONT, font_size=dp(33), color=PINK, size_hint_x=None, width=dp(42))
+            avatar = Label(text='▣', font_name=FONT if FONT else "Roboto", font_size=dp(33), color=PINK, size_hint_x=None, width=dp(42))
         top.add_widget(avatar)
 
         search_wrap = BoxLayout(size_hint_y=None, height=dp(48), padding=[dp(12), dp(1)], spacing=dp(5))
@@ -274,13 +288,13 @@ class BiliPinkApp(App):
             self.search_line = Line(rounded_rectangle=(search_wrap.x,search_wrap.y,search_wrap.width,search_wrap.height,dp(25)), width=1.1)
         search_wrap.bind(pos=self._search_draw, size=self._search_draw)
 
-        search_icon = Button(text='⌕', font_name=FONT, font_size=dp(27),
+        search_icon = Button(text='⌕', font_name=FONT if FONT else "Roboto", font_size=dp(27),
                              background_normal='', background_color=(0,0,0,0),
                              color=(0.43,0.43,0.44,1), size_hint_x=None, width=dp(32))
         search_icon.bind(on_release=lambda *x:self.parse_video())
         self.search_input = TextInput(
             hint_text='BV/AV/搜索',
-            font_name=FONT,
+            font_name=FONT if FONT else "Roboto",
             font_size=dp(16),
             multiline=False,
             background_normal='',
@@ -301,7 +315,7 @@ class BiliPinkApp(App):
         for fnam in ('全部','已完成','进行中','已失败'):
             col = PINK if self.filter == fnam else MUTED
             cell = BoxLayout(orientation='vertical', spacing=0)
-            b = Button(text=fnam, font_name=FONT, font_size=dp(14),
+            b = Button(text=fnam, font_name=FONT if FONT else "Roboto", font_size=dp(14),
                        background_normal='', background_color=(0,0,0,0), color=col)
             b.bind(on_release=lambda *x, v=fnam:self.set_filter(v))
             cell.add_widget(b)
@@ -345,7 +359,7 @@ class BiliPinkApp(App):
                 Color(0.92,0.91,0.91,1)
                 pl.bg = RoundedRectangle(pos=pl.pos, size=pl.size, radius=[dp(12)])
             pl.bind(pos=lambda w,*_:setattr(pl.bg,'pos',w.pos), size=lambda w,*_:setattr(pl.bg,'size',w.size))
-            pl.add_widget(Label(text='BiliPink', font_name=FONT, font_size=dp(14), bold=True, color=PINK))
+            pl.add_widget(Label(text='BiliPink', font_name=FONT if FONT else "Roboto", font_size=dp(14), bold=True, color=PINK))
             thumb.add_widget(pl)
         card.add_widget(thumb)
         info = BoxLayout(orientation='vertical', padding=[dp(12), dp(7), dp(10), dp(5)], spacing=dp(2))
@@ -516,7 +530,7 @@ class BiliPinkApp(App):
         if ava_p and os.path.isfile(ava_p):
             profile.add_widget(Image(source=ava_p, fit_mode='contain', size_hint_x=None, width=dp(105)))
         else:
-            profile.add_widget(Label(text='♙', font_name=FONT, font_size=dp(56), color=PINK, size_hint_x=None, width=dp(105)))
+            profile.add_widget(Label(text='♙', font_name=FONT if FONT else "Roboto", font_size=dp(56), color=PINK, size_hint_x=None, width=dp(105)))
         col = BoxLayout(orientation='vertical', spacing=dp(4))
         col.add_widget(self._label('未登录',18,PINK,True,height=dp(35)))
         col.add_widget(self._label('点击此处登录',14,MUTED,height=dp(28)))
@@ -679,21 +693,4 @@ class BiliPinkApp(App):
 
     def _load_history(self):
         try:
-            with open(self._history_path(), 'r', encoding='utf-8') as f:
-                self.history = json.load(f)
-            if not isinstance(self.history, list):
-                self.history = []
-        except Exception:
-            self.history = []
-
-    def _save_history(self):
-        try:
-            os.makedirs(self.user_data_dir, exist_ok=True)
-            with open(self._history_path(), 'w', encoding='utf-8') as f:
-                json.dump(self.history, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-
-if __name__ == '__main__':
-    BiliPinkApp().run()
+            with ope
