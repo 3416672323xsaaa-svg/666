@@ -12,6 +12,11 @@ USER_AGENT = (
 )
 
 
+def install_ffmpeg_from_assets():
+    """Compatibility no-op: this downloader uses Android MediaMuxer, not FFmpeg."""
+    return False
+
+
 def safe_filename(name):
     name = str(name or "video").strip()
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name)
