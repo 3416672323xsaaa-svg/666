@@ -10,7 +10,6 @@ source.include_dirs = fonts
 
 android.api = 33
 android.ndk = 25b
-android.sdk = 24
 android.build_tools = 33.0.2
 
 android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
@@ -18,7 +17,6 @@ android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANA
 android.fonts = fonts/:fonts
 
 requirements = python3,kivy==2.3.0,kivymd==1.2.0,requests,yt-dlp
-p4a.branch = 2024.10
 
 android.archs = arm64-v8a
 
