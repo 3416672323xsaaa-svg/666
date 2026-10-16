@@ -7,37 +7,36 @@ on:
 env:
   ANDROID_HOME: ${{github.workspace}}/android-sdk
   ANDROID_SDK_ROOT: ${{github.workspace}}/android-sdk
-  P4A_JOBS: 2
+  NDK_ROOT: ${{github.workspace}}/android-ndk-r28c
   _JAVA_OPTIONS: -Xmx2200M
   GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 
 jobs:
   build-apk:
     runs-on: ubuntu-22.04
-    timeout-minutes: 200
+    timeout-minutes: 220
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enable Swap(工作区内，无权限坑)
+      - name: Swap (workspace)
         run: |
           SWAPIMG="${GITHUB_WORKSPACE}/swap.img"
-          rm -f "$SWAPIMG"
+          rm -f "$SWAPIMG" || true
           dd if=/dev/zero of="$SWAPIMG" bs=1M count=2048 status=none
           chmod 600 "$SWAPIMG"
-          mkswap "$SWAPIMG"
           sudo swapon "$SWAPIMG" || true
 
-      - name: Install system packages
+      - name: Install system deps
         run: |
           sudo apt update -qq
-          sudo apt install -qq -y wget unzip zip openjdk-17-jdk git build-essential autoconf automake cmake libffi-dev pkg-config zlib1g-dev gettext autopoint
+          sudo apt install -qq -y wget unzip zip openjdk-17-jdk git build-essential autoconf automake cmake libffi-dev pkg-config zlib1g-dev gettext autopoint ant
 
       - name: Setup Python3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Java17
+      - name: Setup Java17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -48,8 +47,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --no-cache-dir Cython==3.0.11 buildozer==1.5.0
 
-      # 【最重要！双路预部署！SDK放android-sdk；NDK直接解压到buildozer盯着的那个名字！】
-      - name: Pre deploy SDK + NDK to EXACT buildozer expected path
+      # ===全部SDK+NDK下载到workspace！不走~/.buildozer！buildozer无权删除这里！！===
+      - name: Pre‑download SDK & NDK (mirror)
         run: |
           mkdir -p $ANDROID_HOME/licenses
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
@@ -57,33 +56,28 @@ jobs:
 
           mkdir -p $ANDROID_HOME/cmdline-tools
           cd $ANDROID_HOME/cmdline-tools
-          wget --timeout=240 https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          wget --tries=5 --timeout=300 https://github.com/AndroidToolsDL/cmdline-tools/raw/main/commandlinetools-linux-11076708_latest.zip
           unzip -q commandlinetools-linux-11076708_latest.zip
           mv cmdline-tools latest
           rm commandlinetools-linux-11076708_latest.zip
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
-          # 直接下载NDK并且【解压到 buildozer 默认等待的那个目录名字！！名字错一个字母都会触发下载！】
-          B_PLATFORM=~/.buildozer/android/platform
-          mkdir -p $B_PLATFORM
-          cd $B_PLATFORM
-          wget --timeout=240 https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-          unzip -q android-ndk-r25b-linux.zip
-          rm android-ndk-r25b-linux.zip
+          # NDK r28c！就是日志推荐的版本！镜像包不走google直连！
+          cd $GITHUB_WORKSPACE
+          wget --tries=5 --timeout=300 https://github.com/AndroidToolsDL/android-ndk/raw/main/android-ndk-r28c-linux.zip
+          unzip -q android-ndk-r28c-linux.zip
+          rm android-ndk-r28c-linux.zip
 
-          # SDK软链也保留给p4a读取
-          ln -sfn $ANDROID_HOME $B_PLATFORM/android-sdk
-
-      - name: Clean old build trash
+      # ⚠️重点！buildozer命令显式给路径！并且关闭它自动安装平台！
+      - name: Build APK (force pass sdk ndk path)
         run: |
-          rm -rf ~/.buildozer/android/platform/build
-          rm -rf ~/.buildozer/android/platform/build-dists
+          buildozer android debug \
+            --no-auto-download \
+            --android-sdk $ANDROID_HOME \
+            --android-ndk $NDK_ROOT
 
-      - name: Build APK
-        run: buildozer android debug
-
-      - name: Upload APK
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: BiliPink-APK
