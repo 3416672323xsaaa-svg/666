@@ -75,12 +75,10 @@ jobs:
           SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
           test -f "$SDKMANAGER"
 
-          # Buildozer 1.5.0 looks for the legacy tools/bin/sdkmanager path.
-          # Link that expected path to the modern command-line tools.
+          # Buildozer 1.5.0 expects this legacy path.
           mkdir -p "$SDK/tools/bin"
           ln -sf "$SDKMANAGER" "$SDK/tools/bin/sdkmanager"
 
-          # Accept licenses and install the exact packages before Buildozer runs.
           yes | bash "$SDKMANAGER" --sdk_root="$SDK" --licenses || true
           bash "$SDKMANAGER" --sdk_root="$SDK"             "platform-tools"             "platforms;android-33"             "build-tools;33.0.2"
 
@@ -89,7 +87,51 @@ jobs:
           test -d "$SDK/platforms/android-33"
           test -x "$SDK/build-tools/33.0.2/aidl"
 
-      - name: Configure build without changing the repository Spec
+      - name: Apply Java MediaMuxer compatibility fix
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/org/bilipink/MediaMerger.java")
+          if not path.is_file():
+              raise SystemExit(f"Required Java source not found: {path}")
+
+          source = path.read_text(encoding="utf-8")
+          original = source
+
+          if "import android.media.MediaCodec;" not in source:
+              source = source.replace(
+                  "import android.media.MediaExtractor;\n",
+                  "import android.media.MediaCodec;\nimport android.media.MediaExtractor;\n",
+                  1,
+              )
+
+          source = source.replace(
+              "MediaMuxer.BufferInfo info = new MediaMuxer.BufferInfo();",
+              "MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();",
+          )
+          source = source.replace(
+              "info.flags |= MediaMuxer\n                        .BUFFER_FLAG_KEY_FRAME;",
+              "info.flags |= MediaCodec\n                        .BUFFER_FLAG_KEY_FRAME;",
+          )
+
+          if "MediaMuxer.BufferInfo" in source:
+              raise SystemExit("Patch incomplete: MediaMuxer.BufferInfo still exists")
+          if ".BUFFER_FLAG_KEY_FRAME" in source and "MediaCodec\n                        .BUFFER_FLAG_KEY_FRAME" not in source:
+              raise SystemExit("Patch incomplete: key-frame flag still uses the wrong class")
+          if source == original:
+              if "MediaCodec.BufferInfo" not in source:
+                  raise SystemExit("No expected Java API pattern found; refusing to build")
+              if "MediaCodec\n                        .BUFFER_FLAG_KEY_FRAME" not in source:
+                  raise SystemExit("Expected corrected key-frame flag not found")
+
+          path.write_text(source, encoding="utf-8")
+          print("MediaMerger.java Android MediaCodec API references verified.")
+          PY
+
+      - name: Configure pinned python-for-android for this CI build
         shell: bash
         run: |
           set -euxo pipefail
@@ -97,8 +139,11 @@ jobs:
           test -f main.py
           python -m py_compile main.py
 
-          # Apply this only inside the temporary GitHub runner workspace.
-          # The committed buildozer.spec in your repository is not changed.
+          # This edits only the ephemeral GitHub runner checkout, not the
+          # committed buildozer.spec in the repository.
+          if grep -q '^p4a.source_dir[[:space:]]*=' buildozer.spec; then
+            sed -i '/^p4a.source_dir[[:space:]]*=/d' buildozer.spec
+          fi
           sed -i '/^\[app\]/a p4a.source_dir = '"$P4A_SOURCE_DIR" buildozer.spec
           grep -F "p4a.source_dir = $P4A_SOURCE_DIR" buildozer.spec
 
