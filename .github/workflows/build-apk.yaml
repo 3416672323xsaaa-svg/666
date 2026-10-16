@@ -35,37 +35,21 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Android build dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential \
-            git \
-            zip \
-            unzip \
-            autoconf \
-            automake \
-            autopoint \
-            libtool \
-            pkg-config \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            libtinfo5 \
-            cmake \
-            ccache \
-            libffi-dev \
-            libssl-dev \
-            libltdl-dev \
-            gettext \
-            patch \
-            wget
+            build-essential git zip unzip \
+            autoconf automake autopoint libtool \
+            pkg-config zlib1g-dev \
+            libncurses5-dev libncursesw5-dev \
+            cmake ccache libffi-dev libssl-dev \
+            libltdl-dev gettext patch wget
 
-      - name: Install Python build tools
+      - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install "Cython==0.29.34"
-          python -m pip install "buildozer==1.5.0"
+          python -m pip install "Cython==0.29.34" "buildozer==1.5.0"
 
       - name: Check project files
         run: |
@@ -74,81 +58,75 @@ jobs:
           test -f main.py
           test -f bili_api.py
           test -f downloader.py
+          echo "All required project files found."
 
-          echo "Required project files are present."
-          echo "Python version:"
-          python --version
-          echo "Java version:"
-          java -version
-
-      - name: Build BiliPink debug APK
+      - name: Build APK and capture log
         id: build
         continue-on-error: true
         run: |
+          set +e
           set -o pipefail
           buildozer -v android debug 2>&1 | tee build.log
+          result=${PIPESTATUS[0]}
+          echo "build_exit_code=$result" >> "$GITHUB_OUTPUT"
+          exit "$result"
 
-      - name: Create failure report
+      - name: Print error details directly in Actions
         if: steps.build.outcome == 'failure'
         run: |
           python - <<'PY'
           import re
           from pathlib import Path
 
-          log_path = Path("build.log")
-          content = log_path.read_text(
-              encoding="utf-8", errors="replace"
-          ) if log_path.exists() else ""
+          p = Path("build.log")
+          raw = p.read_text(errors="replace") if p.exists() else ""
+          raw = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', raw)
+          lines = raw.splitlines()
 
-          content = re.sub(
-              r'\x1b\[[0-9;]*[A-Za-z]', '', content
-          )
-          lines = content.splitlines()
-
-          keywords = (
+          keys = (
               "error:", "fatal error", "traceback",
               "command failed", "exception:",
               "out of memory", "no space left",
-              "killed", "failed with", "not found",
-              "undefined reference"
+              "killed", "undefined reference",
+              "failed to", "not found",
+              "could not", "unable to"
           )
 
-          matches = [
+          hits = [
               i for i, line in enumerate(lines)
-              if any(word in line.lower() for word in keywords)
+              if any(k in line.lower() for k in keys)
           ]
 
-          report = [
-              "BiliPink APK 构建失败报告",
-              f"完整日志行数：{len(lines)}",
-              ""
-          ]
+          print("========== BILIPINK BUILD ERROR REPORT ==========")
+          print("Total log lines:", len(lines))
+          print("Matching error lines:", len(hits))
 
-          if matches:
-              selected = set()
-              for i in matches:
-                  selected.update(
-                      range(max(0, i - 5), min(len(lines), i + 9))
-                  )
+          if hits:
+              chosen = set()
+              for i in hits:
+                  chosen.update(range(max(0, i-3), min(len(lines), i+6)))
 
-              report.append("=== 错误附近的日志 ===")
-              previous = -2
-
-              for i in sorted(selected):
-                  if i > previous + 1:
-                      report.append("...省略...")
-                  report.append(f"{i + 1}: {lines[i]}")
-                  previous = i
+              last = -2
+              for i in sorted(chosen):
+                  if i > last + 1:
+                      print("... omitted ...")
+                  print(f"{i+1}: {lines[i]}")
+                  last = i
           else:
-              report.append("未识别到常见错误关键词。")
-              report.append("=== 日志末尾 200 行 ===")
-              start = max(0, len(lines) - 200)
-
+              print("No common error keywords detected.")
+              print("Showing final 160 log lines:")
+              start = max(0, len(lines)-160)
               for i in range(start, len(lines)):
-                  report.append(f"{i + 1}: {lines[i]}")
+                  print(f"{i+1}: {lines[i]}")
 
-          Path("failure-report.txt").write_text(
-              "\n".join(report) + "\n",
+          print("========== END BUILD ERROR REPORT ==========")
+
+          report = Path("failure-report.txt")
+          report.write_text(
+              "\n".join(
+                  f"{i+1}: {line}"
+                  for i, line in enumerate(lines)
+              ),
               encoding="utf-8"
           )
           PY
@@ -162,7 +140,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload failure diagnostics
+      - name: Upload diagnostic log
         if: always() && steps.build.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
@@ -173,9 +151,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Mark build as failed
-        if: steps.build.outcome == 'failure'
+      - name: Finish with correct build status
+        if: always()
+        env:
+          BUILD_RESULT: ${{ steps.build.outcome }}
         run: |
-          echo "APK build failed."
-          echo "Download BiliPink-build-error-report from Artifacts."
-          exit 1
+          if [ "$BUILD_RESULT" = "success" ]; then
+            echo "BiliPink APK build succeeded."
+          else
+            echo "::error::BiliPink APK build failed. The error details were printed in the previous step."
+            exit 1
+          fi
