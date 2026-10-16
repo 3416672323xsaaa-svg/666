@@ -8,7 +8,7 @@ source.include_dirs = fonts
 version = 1.0
 
 android.api = 33
-android.ndk = r28c
+android.ndk = r25b
 android.build_tools = 33.0.2
 android.archs = arm64-v8a
 android.add_assets = fonts:fonts
@@ -20,10 +20,6 @@ android.meta_data = android.permission.MANAGE_EXTERNAL_STORAGE;android:name=andr
 requirements = python3==3.11,kivy==2.3.1,kivymd==1.2.0,requests,yt-dlp==2026.3.22
 orientation = portrait
 fullscreen = 0
-
-[p4a.env]
-P4A_SDK = ${{github.workspace}}/android-sdk
-P4A_ANDROID_NDK = ${{github.workspace}}/android-ndk-r28c
 
 [buildozer]
 log_level = 2
