@@ -15,9 +15,10 @@ env:
   P4A_JOBS: "2"
   P4A_USE_CERTIFI: '0'
   P4A_ALLOW_TLS_13: '1'
+  PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: '0'
   CYTHON_LANGUAGE_LEVEL: '3'
   _JAVA_OPTIONS: "-Xmx2048m"
-  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2048m"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m"
 
 jobs:
   build-apk:
@@ -29,15 +30,15 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: ✅安全清理 + 开启Swap（修复权限+防OOM）
+      - name: Clean old build artifacts and enable swap
         shell: bash
         run: |
           set +e
-          echo "Wipe old build files"
           rm -rf "$HOME/.buildozer"
           rm -rf "$ANDROID_HOME"
-          rm -rf ~/.cache/*
-          find /tmp -maxdepth 1 -user $USER -delete 2>/dev/null
+          rm -rf ~/.cache/pip
+          rm -rf ~/.cache/ccache
+          find /tmp -maxdepth 1 -user "$USER" -delete 2>/dev/null
           sudo fallocate -l 2G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile
@@ -48,9 +49,13 @@ jobs:
       - name: Install system dependencies
         shell: bash
         run: |
-          set -e
           sudo apt-get update -y
-          sudo apt-get install -y automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf build-essential cmake zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 gettext autopoint wget
+          sudo apt-get install -y \
+            automake libltdl-dev zip unzip openjdk-17-jdk \
+            git pkg-config libffi-dev libssl-dev autoconf \
+            build-essential cmake zlib1g-dev \
+            libncurses5-dev libncursesw5-dev libtinfo5 \
+            gettext autopoint wget
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -63,10 +68,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Prepare SDK dir + licenses + legacy symlink
+      - name: Prepare SDK directories and licenses
         shell: bash
         run: |
-          set -e
           mkdir -p "$ANDROID_HOME/licenses" "$ANDROID_HOME/cmdline-tools"
           BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
           mkdir -p "$BUI_SDK/licenses" "$BUI_SDK/cmdline-tools"
@@ -83,50 +87,61 @@ jobs:
             echo "$L4" > "$D/licenses/android-sdk-license-d9534051"
           done
 
-      - name: Download commandline‑tools
+      - name: Download command-line tools
         shell: bash
         run: |
-          set -e
           cd "$ANDROID_HOME/cmdline-tools"
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q commandlinetools-linux-11076708_latest.zip
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip
           mv cmdline-tools latest
-          rm *.zip
+          rm -f cmdline-tools.zip
           mkdir -p "$ANDROID_HOME/tools/bin"
           ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
 
-      - name: Install exact SDK + NDK r25.2.9519653 + sync
+      - name: Install SDK components and sync Buildozer SDK
         shell: bash
         run: |
-          set -e
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653"
+          sdkmanager --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2" \
+            "ndk;25.2.9519653"
+
           BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
           mkdir -p "$BUI_SDK"
-          cp -r "$ANDROID_HOME"/. "$BUI_SDK/"
+          cp -r "$ANDROID_HOME"/* "$BUI_SDK/"
           mkdir -p "$BUI_SDK/tools/bin"
           ln -sf "$BUI_SDK/cmdline-tools/latest/bin/sdkmanager" "$BUI_SDK/tools/bin/sdkmanager"
+
+          ls "$ANDROID_HOME/ndk/"
+          ls "$BUI_SDK/ndk/"
           free -h
 
-      - name: Install pip + ✅有效长commit的p4a（已经验证可拉取）
+      - name: Install Python build dependencies
         shell: bash
         run: |
-          set -e
-          python -m pip install --upgrade pip==26.2.1 setuptools==72.2.0 wheel==0.43.0
-          python -m pip install 'Cython==3.0.11' 'buildozer==1.5.0' certifi
-          python -m pip install git+https://github.com/kivy/python-for-android.git@7035782e8438950782904859820d453326498687
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install 'Cython==3.0.11' 'buildozer==1.5.0'
 
-      - name: Memory status before build
+      - name: Install python-for-android from stable branch
         shell: bash
         run: |
+          python -m pip install git+https://github.com/kivy/python-for-android.git@stable
+
+      - name: Final environment check
+        shell: bash
+        run: |
+          buildozer --version
+          python -c "import p4a; print(p4a.__file__)"
+          java -version
           free -h
           df -h
 
       - name: Build APK
         shell: bash
         run: |
-          set -e
           buildozer android debug
 
       - name: Upload APK
