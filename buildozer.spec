@@ -25,3 +25,4 @@ fullscreen = 0
 log_level = 2
 warn_on_root = 0
 android.accept_sdk_license = true
+env = P4A_DOWNLOAD_HOST=https://mirrors.aliyun.com/android
