@@ -17,6 +17,11 @@ requirements = python3==3.11,kivy==2.3.0,kivymd==1.2.0,requests,yt-dlp
 orientation = portrait
 fullscreen = 0
 
+[p4a.env]
+P4A_SDK = %(ANDROID_HOME)s
+P4A_ANDROID_NDK = %(ANDROID_HOME)s/ndk/25.2.9519653
+
 [buildozer]
 log_level = 2
 warn_on_root = 0
+android.accept_sdk_license = True
