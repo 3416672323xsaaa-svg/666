@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""BiliPink v2.3.5.foss | Kivy Android | Font fix final"""
-import json, os, shutil, threading, urllib.request
+"""BiliPink v2.4.0 | Kivy Android | Search Keyword Support"""
+import json, os, shutil, threading, urllib.request, time, hashlib
 from datetime import datetime
 from kivy.app import App
 from kivy.clock import Clock
@@ -20,7 +20,7 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, RoundedRectangle, Line
 from kivy.utils import platform
 
-from bili_api import get_video_info, get_download_options
+from bili_api import get_video_info, get_download_options, bilibili_search
 from downloader import download_stream, safe_filename
 
 PINK = (0.91, 0.39, 0.57, 1)
@@ -35,6 +35,11 @@ BORDER = (0.90, 0.89, 0.90, 1)
 
 FONT = None
 _FONT_LOADED = False
+
+WBI_IMG_KEY = "337536b025854e6c8752557253147eb5"
+WBI_SUB_KEY = "73278d948d84fd84097d6129478c9012"
+BUVID = "abcdef1234567890abcdef1234567890"
+UA = "Mozilla/5.0 (Android; Mobile) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36"
 
 
 def fmt_num(n):
@@ -70,6 +75,17 @@ def human_size(n):
             n /= 1024
     except Exception:
         return '未知大小'
+
+
+def enc_wbi(params: dict, img_key: str, sub_key: str):
+    table = [46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,6,51,17,26,34,22,52,21,20,25,4,30]
+    def mix(s): return "".join([s[i] for i in table if i < len(s)])
+    salt = mix(img_key + sub_key)
+    params["wts"] = str(int(time.time()))
+    items = sorted(params.items())
+    qs = "&".join(f"{k}={v}" for k, v in items)
+    params["w_rid"] = hashlib.md5((qs + salt).encode()).hexdigest()
+    return params
 
 
 class Surface(BoxLayout):
@@ -175,6 +191,7 @@ class BiliPinkApp(App):
         self.tasks = []
         self.filter = '全部'
         self.page_name = 'home'
+        self.search_result_list = []
 
         self.root_layout = BoxLayout(orientation='vertical', spacing=0)
         self.body = BoxLayout(orientation='vertical')
@@ -239,7 +256,7 @@ class BiliPinkApp(App):
             else:
                 self.show_mine()
 
-        for key, label, icon in (('home', '主页', '⌂'), ('mine', '我的', '♙')):
+        for key, label, icon in (('home', '主页', ''), ('mine', '我的', '')):
             active = self.page_name == key
             c = PINK if active else (0.48, 0.48, 0.49, 1)
             box = BoxLayout(orientation='vertical', spacing=0)
@@ -277,7 +294,7 @@ class BiliPinkApp(App):
         if ava_p and os.path.isfile(ava_p):
             avatar = Image(source=ava_p, fit_mode='contain', size_hint_x=None, width=dp(48))
         else:
-            avatar = Label(text='▣', font_name=FONT if FONT else "Roboto", font_size=dp(33), color=PINK, size_hint_x=None, width=dp(42))
+            avatar = Label(text='', font_name=FONT if FONT else "Roboto", font_size=dp(33), color=PINK, size_hint_x=None, width=dp(42))
         top.add_widget(avatar)
 
         search_wrap = BoxLayout(size_hint_y=None, height=dp(48), padding=[dp(12), dp(1)], spacing=dp(5))
@@ -288,12 +305,12 @@ class BiliPinkApp(App):
             self.search_line = Line(rounded_rectangle=(search_wrap.x,search_wrap.y,search_wrap.width,search_wrap.height,dp(25)), width=1.1)
         search_wrap.bind(pos=self._search_draw, size=self._search_draw)
 
-        search_icon = Button(text='⌕', font_name=FONT if FONT else "Roboto", font_size=dp(27),
+        search_icon = Button(text='', font_name=FONT if FONT else "Roboto", font_size=dp(27),
                              background_normal='', background_color=(0,0,0,0),
                              color=(0.43,0.43,0.44,1), size_hint_x=None, width=dp(32))
-        search_icon.bind(on_release=lambda *x:self.parse_video())
+        search_icon.bind(on_release=lambda *x:self.do_search_or_parse())
         self.search_input = TextInput(
-            hint_text='BV/AV/搜索',
+            hint_text='输入BV/AV/链接/关键词',
             font_name=FONT if FONT else "Roboto",
             font_size=dp(16),
             multiline=False,
@@ -305,7 +322,7 @@ class BiliPinkApp(App):
             cursor_color=PINK,
             padding=[dp(3), dp(10)]
         )
-        self.search_input.bind(on_text_validate=lambda *x:self.parse_video())
+        self.search_input.bind(on_text_validate=lambda *x:self.do_search_or_parse())
         search_wrap.add_widget(search_icon)
         search_wrap.add_widget(self.search_input)
         top.add_widget(search_wrap)
@@ -328,8 +345,13 @@ class BiliPinkApp(App):
             filters.add_widget(cell)
         self.content.add_widget(filters)
 
-        if self.filter == '全部' and not self.tasks and not self.history:
-            self.content.add_widget(self._label('输入 BV / AV 号或粘贴 B站视频链接开始解析',13,MUTED,False,'center',dp(90)))
+        if self.search_result_list:
+            self.content.add_widget(self._label("搜索结果",15,TEXT,True,'left',dp(36)))
+            for item in self.search_result_list:
+                self.content.add_widget(self._search_result_card(item))
+
+        if self.filter == '全部' and not self.tasks and not self.history and not self.search_result_list:
+            self.content.add_widget(self._label('输入BV / AV / 链接或者中文关键词开始',13,MUTED,False,'center',dp(90)))
 
         visible = []
         for tsk in self.tasks:
@@ -347,6 +369,64 @@ class BiliPinkApp(App):
         for item in visible:
             self.content.add_widget(self._task_card(item))
 
+    def _search_result_card(self, it):
+        card = Surface(orientation='horizontal', size_hint_y=None, height=dp(104), padding=0, spacing=0)
+        thumb = BoxLayout(size_hint_x=None, width=dp(112))
+        cover_path = ''
+        cache_dir = os.path.join(self.user_data_dir, 'covers')
+        os.makedirs(cache_dir, exist_ok=True)
+        local_cover = os.path.join(cache_dir, it["bvid"] + "_s.jpg")
+        if os.path.exists(local_cover):
+            thumb.add_widget(Image(source=local_cover, fit_mode='cover'))
+        else:
+            pl = FloatLayout()
+            with pl.canvas.before:
+                Color(0.92,0.91,0.91,1)
+                pl.bg = RoundedRectangle(pos=pl.pos, size=pl.size, radius=[dp(12)])
+            pl.bind(pos=lambda w,*_:setattr(pl.bg,'pos',w.pos), size=lambda w,*_:setattr(pl.bg,'size',w.size))
+            pl.add_widget(Label(text='', font_name=FONT if FONT else "Roboto", font_size=dp(14), bold=True, color=PINK))
+            thumb.add_widget(pl)
+        card.add_widget(thumb)
+        info = BoxLayout(orientation='vertical', padding=[dp(12), dp(7), dp(10), dp(5)], spacing=dp(2))
+        info.add_widget(self._label(it["title"],14,PINK,True,height=dp(34)))
+        sub = f"{it['duration']} | {it['pubdate']} | UP:{it['author']}"
+        info.add_widget(self._label(sub,11,MUTED,height=dp(21)))
+        row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(6))
+        row.add_widget(self._btn("选择解析", lambda bv=it["bvid"]: self.parse_by_bvid(bv), PINK, WHITE, dp(36), True))
+        info.add_widget(row)
+        card.add_widget(info)
+        return card
+
+    def parse_by_bvid(self, bvid):
+        self.search_input.text = bvid
+        self.search_result_list.clear()
+        self.parse_video()
+
+    def do_search_or_parse(self):
+        txt = self.search_input.text.strip()
+        if not txt:
+            return
+        has_bv = "BV" in txt.upper()
+        has_av = "av" in txt.lower()
+        has_link = "bilibili.com" in txt or "b23.tv" in txt
+        if has_bv or has_av or has_link:
+            self.search_result_list.clear()
+            self.parse_video()
+        else:
+            if self.busy:
+                return
+            self.busy = True
+            threading.Thread(target=self._search_worker, args=(txt,), daemon=True).start()
+
+    def _search_worker(self, kw):
+        res = bilibili_search(kw)
+        Clock.schedule_once(lambda dt: self._search_done(res),0)
+
+    def _search_done(self, res):
+        self.busy = False
+        self.search_result_list = res
+        self.show_home()
+
     def _task_card(self, t):
         card = Surface(orientation='horizontal', size_hint_y=None, height=dp(100), padding=0, spacing=0)
         thumb = BoxLayout(size_hint_x=None, width=dp(112))
@@ -359,7 +439,7 @@ class BiliPinkApp(App):
                 Color(0.92,0.91,0.91,1)
                 pl.bg = RoundedRectangle(pos=pl.pos, size=pl.size, radius=[dp(12)])
             pl.bind(pos=lambda w,*_:setattr(pl.bg,'pos',w.pos), size=lambda w,*_:setattr(pl.bg,'size',w.size))
-            pl.add_widget(Label(text='BiliPink', font_name=FONT if FONT else "Roboto", font_size=dp(14), bold=True, color=PINK))
+            pl.add_widget(Label(text='', font_name=FONT if FONT else "Roboto", font_size=dp(14), bold=True, color=PINK))
             thumb.add_widget(pl)
         card.add_widget(thumb)
         info = BoxLayout(orientation='vertical', padding=[dp(12), dp(7), dp(10), dp(5)], spacing=dp(2))
@@ -370,7 +450,7 @@ class BiliPinkApp(App):
         row = BoxLayout(size_hint_y=None, height=dp(24), spacing=dp(5))
         stat = t.get('status','已完成')
         stat_color = GREEN if stat == '已完成' else (RED if stat == '已失败' else PINK)
-        stat_text = '☁✓ ' if stat == '已完成' else ('× ' if stat == '已失败' else '↓ ')
+        stat_text = '' if stat == '已完成' else (' ' if stat == '已失败' else ' ')
         row.add_widget(self._label(stat_text+stat,12,stat_color,True,height=dp(24)))
         if stat in ('下载中','解析中','等待下载'):
             row.add_widget(self._label(f"{t.get('percent',0):.0f}%",11,MUTED,False,'right',dp(24)))
@@ -396,7 +476,7 @@ class BiliPinkApp(App):
             return
         raw = self.search_input.text.strip()
         if not raw:
-            self._popup('输入视频链接','请粘贴 B站视频链接，或输入 BV / AV 号。')
+            self._popup('输入视频链接','请粘贴B站视频链接，或输入BV / AV号。')
             return
         self.busy = True
         tid = str(datetime.now().timestamp())
@@ -415,7 +495,7 @@ class BiliPinkApp(App):
                 os.makedirs(cache_dir, exist_ok=True)
                 cover_path = os.path.join(cache_dir, info['bvid']+'.jpg')
                 if not os.path.isfile(cover_path):
-                    req = urllib.request.Request(info['cover'], headers={'User-Agent':'Mozilla/5.0','Referer':'https://www.bilibili.com/'})
+                    req = urllib.request.Request(info['cover'], headers={'User-Agent':UA,'Referer':'https://www.bilibili.com/'})
                     with urllib.request.urlopen(req, timeout=15) as r, open(cover_path,'wb') as f:
                         f.write(r.read())
             except Exception:
@@ -530,7 +610,7 @@ class BiliPinkApp(App):
         if ava_p and os.path.isfile(ava_p):
             profile.add_widget(Image(source=ava_p, fit_mode='contain', size_hint_x=None, width=dp(105)))
         else:
-            profile.add_widget(Label(text='♙', font_name=FONT if FONT else "Roboto", font_size=dp(56), color=PINK, size_hint_x=None, width=dp(105)))
+            profile.add_widget(Label(text='', font_name=FONT if FONT else "Roboto", font_size=dp(56), color=PINK, size_hint_x=None, width=dp(105)))
         col = BoxLayout(orientation='vertical', spacing=dp(4))
         col.add_widget(self._label('未登录',18,PINK,True,height=dp(35)))
         col.add_widget(self._label('点击此处登录',14,MUTED,height=dp(28)))
@@ -539,10 +619,10 @@ class BiliPinkApp(App):
         self.content.add_widget(profile)
 
         menu = Surface(orientation='vertical', size_hint_y=None, padding=0, spacing=0)
-        rows = [('代码仓库','›',lambda:self._open_url('https://github.com/')),
-                ('当前版本','2.3.5.foss',None),
-                ('开源组件许可','›',self.show_licenses),
-                ('问题反馈','›',self.feedback)]
+        rows = [('代码仓库','',lambda:self._open_url('https://github.com/')),
+                ('当前版本','2.4.0',None),
+                ('开源组件许可','',self.show_licenses),
+                ('问题反馈','',self.feedback)]
         for idx,(title,val,cb) in enumerate(rows):
             r = BoxLayout(size_hint_y=None, height=dp(57), padding=[dp(15),0,dp(15),0])
             r.add_widget(self._label(title,15,(0.43,0.42,0.44,1),False,height=dp(56)))
@@ -564,38 +644,38 @@ class BiliPinkApp(App):
             r = Surface(orientation='horizontal', size_hint_y=None, height=dp(58), padding=[dp(15),0,dp(15),0])
             tc = RED if is_red else (0.43,0.42,0.44,1)
             r.add_widget(self._label(title,15,tc,False,height=dp(55)))
-            r.add_widget(self._label('›',30,MUTED,False,'right',dp(55)))
+            r.add_widget(self._label('',30,MUTED,False,'right',dp(55)))
             r.bind(on_touch_down=lambda w,t,f=cb: f() if w.collide_point(*t.pos) else None)
             self.content.add_widget(r)
 
     def _login_info(self):
-        self._popup('账号登录','当前版本暂未实现官方账号登录。需要高画质时，后续版本支持手动填入Cookie；请勿随意分享。')
+        self._popup('账号登录','当前版本暂未实现官方账号登录。需要高画质时，后续版本支持手动填入Cookie。')
 
     def settings(self):
         self._popup('设置','BiliPink 设置\n语言：简体中文\n主题：粉色白色\n下载目录：应用私有目录\n文件名：保留中文标题\n提示：DASH音视频暂不支持合并。')
 
     def show_licenses(self):
-        self._popup('开源组件许可','BiliPink 使用 Kivy(MIT)；字体 Noto Sans CJK (SIL‑OFL)；其他组件遵循各自许可证。')
+        self._popup('开源组件许可','BiliPink 使用 Kivy；字体 Noto Sans CJK；其他组件遵循各自许可证。')
 
     def feedback(self):
-        self._popup('问题反馈','反馈请带上：视频链接类型、报错文字、Android版本；不要粘贴账号密码。')
+        self._popup('问题反馈','反馈请带上：视频链接类型、报错文字、Android版本。')
 
     def rate_app(self):
-        self._popup('感谢支持','项目尚未上架商店，暂时无法评分，感谢测试！')
+        self._popup('感谢支持','项目尚未上架商店，暂时无法评分。')
 
     def show_downloaded(self):
         self.page_name = 'mine'
         self._scroll()
         self._nav()
         self.content.add_widget(self._label('已下载文件',20,PINK,True,height=dp(38)))
-        self.content.add_widget(self._label('视频保存在应用私有目录，点击导出复制到Download/BiliPink（受系统权限控制）',12,MUTED,height=dp(48)))
+        self.content.add_widget(self._label('视频保存在应用私有目录，点击导出复制到Download/BiliPink',12,MUTED,height=dp(48)))
         if not self.history:
             self.content.add_widget(self._label('暂时没有已下载文件',14,MUTED,False,'center',dp(70)))
         else:
             for rec in self.history:
                 card = Surface(orientation='vertical', size_hint_y=None, padding=dp(12), spacing=dp(6))
                 card.add_widget(self._label(rec.get('title','视频'),14,PINK,True,height=dp(38)))
-                card.add_widget(self._label(f"{rec.get('quality','')} · {rec.get('time','')}\n{rec.get('path','')}",11,MUTED,height=dp(42)))
+                card.add_widget(self._label(f"{rec.get('quality','')} · {rec.get('time','')}",11,MUTED,height=dp(42)))
                 row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(8))
                 row.add_widget(self._btn('导出到手机',lambda r=rec:self.export_record(r), PINK, WHITE, dp(40), True))
                 row.add_widget(self._btn('删除记录',lambda r=rec:self.delete_record(r), PINK_LIGHT, PINK, dp(40)))
@@ -608,89 +688,4 @@ class BiliPinkApp(App):
         if not src or not os.path.isfile(src):
             self._popup('文件不存在','原文件已移动或删除。')
             return
-        try:
-            if platform == 'android':
-                from jnius import autoclass
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                activity = PythonActivity.mActivity
-                ContentValues = autoclass('android.content.ContentValues')
-                MediaStoreVideo = autoclass('android.provider.MediaStore$Video$Media')
-                values = ContentValues()
-                bn = os.path.basename(src)
-                values.put('_display_name', bn)
-                values.put('mime_type', 'video/mp4')
-                values.put('relative_path', 'Download/BiliPink')
-                resolver = activity.getContentResolver()
-                uri = resolver.insert(MediaStoreVideo.EXTERNAL_CONTENT_URI, values)
-                if uri is None:
-                    raise RuntimeError('无法创建MediaStore记录')
-                outs = resolver.openOutputStream(uri)
-                fin = open(src, 'rb')
-                while True:
-                    chunk = fin.read(1024*1024)
-                    if not chunk:
-                        break
-                    outs.write(chunk)
-                fin.close()
-                outs.close()
-                self._popup('导出完成', f'已导出 Download/BiliPink/{bn}')
-            else:
-                destfolder = os.path.join(os.path.expanduser('~'), 'Downloads', 'BiliPink')
-                os.makedirs(destfolder, exist_ok=True)
-                destfile = os.path.join(destfolder, os.path.basename(src))
-                shutil.copy2(src, destfile)
-                self._popup('导出完成', destfile)
-        except Exception as e:
-            self._popup('导出失败', f'{str(e)}\n原文件还在应用目录内')
-
-    def delete_record(self, rec):
-        self.history = [h for h in self.history if h.get('id') != rec.get('id')]
-        self.tasks = [t for t in self.tasks if t.get('id') != rec.get('id')]
-        self._save_history()
-        self.show_downloaded()
-
-    def clear_data(self):
-        box = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(12))
-        box.add_widget(self._label('确定清除全部下载历史与缓存？视频文件也将删除、不可恢复。',14,TEXT,height=dp(70)))
-        pop = Popup(title='清除数据', content=box, size_hint=(0.86,0.36))
-        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        row.add_widget(self._btn('取消', pop.dismiss, PINK_LIGHT, PINK))
-        row.add_widget(self._btn('确认清除', lambda:(pop.dismiss(), self._clear_all()), RED, WHITE))
-        box.add_widget(row)
-        pop.open()
-
-    def _clear_all(self):
-        for r in self.history:
-            fp = r.get('path','')
-            try:
-                if fp and os.path.isfile(fp):
-                    os.remove(fp)
-            except OSError:
-                pass
-        self.history = []
-        self.tasks = []
-        self._save_history()
-        self.show_mine()
-        self._popup('已清除','下载记录与可删除视频已清空。')
-
-    def _open_url(self, url):
-        try:
-            import webbrowser
-            webbrowser.open(url)
-        except Exception:
-            self._popup('链接', url)
-
-    def _popup(self, title, msg):
-        box = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(10))
-        lab = self._label(msg,13,TEXT,height=dp(160))
-        box.add_widget(lab)
-        pop = Popup(title=title, content=box, size_hint=(0.88,0.52), auto_dismiss=True)
-        box.add_widget(self._btn('知道了', pop.dismiss, PINK, WHITE, dp(42), True))
-        pop.open()
-
-    def _history_path(self):
-        return os.path.join(self.user_data_dir, 'history.json')
-
-    def _load_history(self):
-        try:
-            with ope
+        tr
