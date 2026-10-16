@@ -4,7 +4,7 @@ package.name = bilipink
 package.domain = org.bilipink
 source.dir = .
 source.include_exts = py,png,jpg,jpeg,kv,json,ttf,otf,xml,txt
-source.include_patterns = fonts/*,assets/*
+source.include_patterns = fonts/*
 source.exclude_dirs = .git,.github,bin,.buildozer,__pycache__
 version = 1.1.0
 orientation = portrait
@@ -22,7 +22,7 @@ android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.enable_androidx = True
 
-# 本地fonts → APK assets/fonts
+# 单独映射：本地fonts → APK assets/fonts（这才是真正负责注入assets的行）
 android.add_assets = fonts:assets/fonts
 
 p4a.extra_args = --use-certifi
