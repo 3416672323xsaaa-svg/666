@@ -16,7 +16,6 @@ env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
   CYTHON_LANGUAGE_LEVEL: '3'
-  PATH: ${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin:${{ env.PATH }}
 
 jobs:
   build-apk:
@@ -82,20 +81,25 @@ jobs:
           cd "$ANDROID_HOME/cmdline-tools"
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O commandline-tools.zip
           unzip -q commandline-tools.zip
-          # 修复解压嵌套：把解压出来的 cmdline-tools → latest
           mv cmdline-tools latest
           rm -f commandline-tools.zip
 
-          # Google官方许可哈希（永久有效）
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
           echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
           echo "d975f751698a77b662f1254ddbeed3901f976be5" > "$ANDROID_HOME/licenses/android-sdk-license-5be876d5"
 
+          # PATH在这里动态注入，而不是env块里自引用！
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           sdkmanager --sdk_root="$ANDROID_HOME" --update
           sdkmanager --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
             "platforms;android-33" \
             "build-tools;33.0.2"
+
+      - name: Put SDK bin into global PATH ✅正确的加PATH方式
+        shell: bash
+        run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
       - name: Cache Android SDK and Buildozer workdir
         uses: actions/cache@v4
@@ -103,9 +107,9 @@ jobs:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v10-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v11-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v10-${{ runner.os }}-
+            bilipink-sdk-v11-${{ runner.os }}-
 
       - name: Install Python packages & P4A develop
         shell: bash
