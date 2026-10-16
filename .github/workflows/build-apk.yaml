@@ -10,7 +10,7 @@ env:
   PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
   P4A_USE_CERTIFI: 1
   P4A_ALLOW_TLS_13: 1
-  PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+  # ❗删掉PIP_INDEX_URL = 彻底不用国内镜像
 
 jobs:
   build-apk:
@@ -30,7 +30,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: 💥 Purge old buildozer cache FIRST（强制清旧缓存）
+      - name: 💥 Purge old buildozer cache FIRST
         run: |
           rm -rf ~/.buildozer
           mkdir -p ~/.buildozer
@@ -40,26 +40,20 @@ jobs:
         with:
           path: ~/.buildozer
           key: bilipink-auto-${{ github.sha }}
-          # ⚠️用 commit hash 当 key：每一次提交自动全新一套缓存，完全不会吃旧脏数据
 
       - name: Install system dependencies
         run: |
           sudo apt update -y
           sudo apt -y install automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf
 
-      - name: Install python packages
+      - name: Install python packages (official PyPI)
         run: |
           python -m pip install --upgrade pip
           pip install Cython==3.0.11 buildozer==1.6.1 certifi
 
-      - name: Pre‑deploy NDK‑25b（清华镜像 + 改名适配buildozer1.6.1）
+      - name: Auto accept SDK licenses
         run: |
-          cd ~/.buildozer/android/platform
-          wget -q https://mirrors.tuna.tsinghua.edu.cn/android/ndk/android-ndk-r25b-linux.zip
-          unzip -q android-ndk-r25b-linux.zip
-          mv android-ndk-r25b android-ndk-25b
-          rm -f android-ndk-r25b-linux.zip
-          ls -la
+          yes | ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true
 
       - name: Print versions
         run: |
@@ -68,7 +62,7 @@ jobs:
 
       - name: Check fonts folder
         run: |
-          if [ ! -d "./fonts" ]; then echo "::warning file=buildozer.spec::fonts文件夹缺失，中文图标会方框！"; fi
+          if [ ! -d "./fonts" ]; then echo "::warning file=buildozer.spec::fonts文件夹缺失，中文会方框！"; fi
           ls -la ./fonts || true
 
       - name: Build APK
