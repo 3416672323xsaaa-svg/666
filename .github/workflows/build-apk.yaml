@@ -53,9 +53,10 @@ jobs:
           mkdir -p "$ANDROID_HOME/cmdline-tools"
           cd "$ANDROID_HOME/cmdline-tools"
 
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076798_latest.zip
-          unzip -q commandlinetools-linux-11076798_latest.zip
-          mv cmdline-tools latest
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O commandline-tools.zip
+          unzip -q commandline-tools.zip
+          mkdir -p latest
+          mv cmdline-tools/* latest/
 
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             --sdk_root="$ANDROID_HOME" --licenses
