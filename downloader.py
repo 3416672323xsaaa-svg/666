@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Reliable direct MP4 stream downloader. Filenames preserve Chinese Unicode."""
+"""BiliPink downloader，纯urllib实现，无yt‑dlp"""
 import os
 import re
 import urllib.request
@@ -9,50 +9,55 @@ UA = ("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 "
 
 
 def safe_filename(name):
-    # Keep Chinese/Japanese/Korean characters; remove only filesystem-reserved chars.
-    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", str(name or "BiliPink_video"))
-    name = re.sub(r"\s+", " ", name).strip(" .")
-    return (name or "BiliPink_video")[:100]
+    name = str(name or "BiliPink视频")
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1F]', "_", name)
+    name = re.sub(r'\s+', " ", name).strip(" .")
+    if len(name) > 96:
+        name = name[:96]
+    return name or "BiliPink视频"
 
 
 def download_stream(url, output_path, progress=None, cancel_check=None):
-    parent = os.path.dirname(output_path) or "."
-    os.makedirs(parent, exist_ok=True)
-    temp_path = output_path + ".part"
-    req = urllib.request.Request(url, headers={
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    temp = output_path + ".part"
+    # B站直链必须带Referer，否则403
+    headers = {
         "User-Agent": UA,
         "Referer": "https://www.bilibili.com/",
-        "Accept": "video/mp4,application/octet-stream,*/*",
-    })
+        "Accept": "*/*"
+    }
+    req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=45) as response:
-            status = getattr(response, "status", 200)
-            if status < 200 or status >= 300:
-                raise RuntimeError("视频服务器返回 HTTP 状态：" + str(status))
-            content_type = (response.headers.get("Content-Type") or "").lower()
-            if "text/html" in content_type or "application/json" in content_type:
-                raise RuntimeError("服务器返回了网页或错误信息，不是视频文件。请重新解析，或检查视频权限。")
-            total = int(response.headers.get("Content-Length") or 0)
+        with urllib.request.urlopen(req, timeout=48) as rsp:
+            status = getattr(rsp, "status",200)
+            if not (200 <= status <300):
+                raise RuntimeError(f"HTTP {status} 被B站拒绝（链接过期/防盗链）")
+            ctype = (rsp.headers.get("Content-Type") or "").lower()
+            if "text/html" in ctype or "application/json" in ctype:
+                raise RuntimeError("返回不是视频！解析出来的下载链接已失效，请重新解析一次视频")
+            total = int(rsp.headers.get("Content-Length") or 0)
             done = 0
-            with open(temp_path, "wb") as out:
+            with open(temp, "wb") as f:
                 while True:
                     if cancel_check and cancel_check():
-                        raise InterruptedError("下载已取消")
-                    chunk = response.read(256 * 1024)
+                        raise InterruptedError("用户取消下载")
+                    chunk = rsp.read(256*1024)
                     if not chunk:
                         break
-                    out.write(chunk)
+                    f.write(chunk)
                     done += len(chunk)
-                    if progress:
+                    if progress is not None:
                         progress(done, total)
-        if done < 1024:
-            raise RuntimeError("下载内容异常或文件过小，未保存为有效视频。")
-        os.replace(temp_path, output_path)
+        if done <= 1024:
+            raise RuntimeError("下载得到文件太小，可能中断或链接失效")
+        os.replace(temp, output_path)
         return output_path
     except Exception:
         try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except OSError:
+            if os.path.exists(temp):
+                os.remove(temp)
+        except Exception:
             pass
         raise
