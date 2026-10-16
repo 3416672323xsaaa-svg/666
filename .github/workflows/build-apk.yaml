@@ -74,9 +74,9 @@ jobs:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v7-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v8-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v7-${{ runner.os }}-
+            bilipink-sdk-v8-${{ runner.os }}-
 
       - name: Install system dependencies
         shell: bash
@@ -112,9 +112,9 @@ jobs:
             'Cython==3.0.11' \
             'buildozer==1.5.0' \
             certifi
-          # ✅ tag不带v：2024.12
+          # ✅ 修正！正式tag = 2024.10
           python -m pip install \
-            'git+https://github.com/kivy/python-for-android.git@2024.12'
+            'git+https://github.com/kivy/python-for-android.git@2024.10'
 
       - name: Print tool versions
         shell: bash
