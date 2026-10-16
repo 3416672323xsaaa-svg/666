@@ -1,181 +1,203 @@
 name: Android Build BiliPink
 
-on:
-push:
-branches: [ main ]
-pull_request:
-branches: [ main ]
-workflow_dispatch:
+'on':
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 env:
-PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: '0'
-P4A_USE_CERTIFI: '0'
-P4A_ALLOW_TLS_13: '1'
-ANDROID_HOME: ${{ github.workspace }}/android-sdk
-ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-CYTHON_LANGUAGE_LEVEL: '3'
+  PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: '0'
+  P4A_USE_CERTIFI: '0'
+  P4A_ALLOW_TLS_13: '1'
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+  CYTHON_LANGUAGE_LEVEL: '3'
 
 jobs:
-build-apk:
-runs-on: ubuntu-22.04
-timeout-minutes: 150
+  build-apk:
+    name: Build BiliPink APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
 
-steps:
-  - name: Checkout source code
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
-  - name: Setup Python 3.11
-    uses: actions/setup-python@v5
-    with:
-      python-version: '3.11'
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-  - name: Setup Java 17
-    uses: actions/setup-java@v4
-    with:
-      java-version: '17'
-      distribution: 'temurin'
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-  - name: Purge old buildozer cache
-    run: |
-      rm -rf ~/.buildozer
-      mkdir -p ~/.buildozer
-      rm -rf "$ANDROID_HOME"
+      - name: Prepare build environment
+        shell: bash
+        run: |
+          set -e
+          rm -rf "$HOME/.buildozer"
+          mkdir -p "$HOME/.buildozer"
+          rm -rf "$ANDROID_HOME"
 
-  - name: Download Android SDK and accept licenses
-    shell: bash
-    run: |
-      set -euo pipefail
-      mkdir -p "$ANDROID_HOME/cmdline-tools"
-      cd "$ANDROID_HOME/cmdline-tools"
+      - name: Download Android SDK and accept licenses
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          cd "$ANDROID_HOME/cmdline-tools"
 
-      wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076798_latest.zip
-      unzip -q commandlinetools-linux-11076798_latest.zip
-      mv cmdline-tools latest
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076798_latest.zip
+          unzip -q commandlinetools-linux-11076798_latest.zip
+          mv cmdline-tools latest
 
-      yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-        --sdk_root="$ANDROID_HOME" --licenses
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$ANDROID_HOME" --licenses
 
-      "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-        --sdk_root="$ANDROID_HOME" \
-        "build-tools;33.0.2" \
-        "platforms;android-33" \
-        "platform-tools"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2"
 
-  - name: Cache SDK and buildozer
-    uses: actions/cache@v4
-    with:
-      path: |
-        ~/.buildozer
-        ${{ github.workspace }}/android-sdk
-      key: bilipink-sdk-v4-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-      restore-keys: |
-        bilipink-sdk-v4-${{ runner.os }}-
+      - name: Cache Android SDK and Buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            ${{ github.workspace }}/android-sdk
+          key: bilipink-sdk-v5-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            bilipink-sdk-v5-${{ runner.os }}-
 
-  - name: Install system dependencies
-    run: |
-      sudo apt-get update
-      sudo apt-get install -y \
-        automake \
-        libltdl-dev \
-        zip \
-        unzip \
-        openjdk-17-jdk \
-        git \
-        pkg-config \
-        libffi-dev \
-        libssl-dev \
-        autoconf \
-        build-essential \
-        cmake \
-        zlib1g-dev \
-        libncurses5-dev \
-        libncursesw5-dev \
-        libtinfo5 \
-        gettext \
-        autopoint
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y \
+            automake \
+            libltdl-dev \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            git \
+            pkg-config \
+            libffi-dev \
+            libssl-dev \
+            autoconf \
+            build-essential \
+            cmake \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo5 \
+            gettext \
+            autopoint
 
-  - name: Install Python packages
-    run: |
-      python -m pip install --upgrade pip setuptools wheel
-      python -m pip install \
-        'Cython==3.0.11' \
-        'buildozer==1.5.0' \
-        certifi
+      - name: Install Python packages
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install \
+            'Cython==3.0.11' \
+            'buildozer==1.5.0' \
+            certifi
+          python -m pip install \
+            'git+https://github.com/kivy/python-for-android.git@v2024.12'
 
-      python -m pip install \
-        'git+https://github.com/kivy/python-for-android.git@v2024.12'
+      - name: Print tool versions
+        shell: bash
+        run: |
+          buildozer --version
+          python -c "import Cython, certifi; print('Cython:', Cython.__version__); print('certifi:', certifi.__version__)"
+          java -version
 
-  - name: Print versions
-    run: |
-      buildozer --version
-      python -c "import Cython, certifi; print('Cython:', Cython.__version__, 'certifi:', certifi.__version__)"
+      - name: Check project files and OTF fonts
+        shell: bash
+        run: |
+          set -e
 
-  - name: Check project files and fonts folder
-    shell: bash
-    run: |
-      set -e
+          test -f buildozer.spec || {
+            echo "::error::buildozer.spec is missing"
+            exit 1
+          }
 
-      test -f buildozer.spec
-      test -f main.py
+          test -f main.py || {
+            echo "::error::main.py is missing"
+            exit 1
+          }
 
-      echo "===== Project root ====="
-      ls -la
+          echo "===== Repository root ====="
+          ls -la
 
-      echo "===== Fonts folder ====="
-      if [ ! -d "./fonts" ]; then
-        echo "::error::fonts folder is missing from the repository root."
-        exit 1
-      fi
+          if [ ! -d fonts ]; then
+            echo "::error::fonts folder is missing"
+            exit 1
+          fi
 
-      find ./fonts -maxdepth 2 -type f -print
+          echo "===== OTF font files ====="
+          find fonts -type f -iname '*.otf' -print
 
-      FONT_COUNT="$(find ./fonts -type f \( \
-        -iname '*.otf' -o -iname '*.ttf' \
-        \) | wc -l)"
+          FONT_COUNT=$(find fonts -type f -iname '*.otf' | wc -l)
 
-      if [ "$FONT_COUNT" -eq 0 ]; then
-        echo "::error::No .otf or .ttf font found in fonts/."
-        exit 1
-      fi
+          if [ "$FONT_COUNT" -eq 0 ]; then
+            echo "::error::No OTF font file found in fonts/"
+            exit 1
+          fi
 
-      echo "Found $FONT_COUNT font file(s)."
+          echo "Found $FONT_COUNT OTF font file(s)."
 
-  - name: Check Python syntax and UTF-8
-    run: |
-      python - <<'PY'
-      from pathlib import Path
+      - name: Check Python syntax and UTF-8
+        shell: bash
+        run: |
+          set -e
+          python - <<'PY'
+          from pathlib import Path
 
-      for path in Path(".").glob("*.py"):
-          path.read_text(encoding="utf-8")
-          print("UTF-8 OK:", path)
-      PY
+          files = sorted(Path(".").glob("*.py"))
 
-      python -m py_compile main.py
+          if not files:
+              raise SystemExit("No Python files found.")
 
-  - name: Build APK
-    env:
-      GRADLE_OPTS: >-
-        -Dorg.gradle.daemon=false
-        -Dorg.gradle.jvmargs=-Xmx2048m
-        -XX:MaxMetaspaceSize=512m
-    run: |
-      buildozer -v android debug
+          for file in files:
+              source = file.read_text(encoding="utf-8")
+              compile(source, str(file), "exec")
+              print("Python syntax and UTF-8 OK:", file)
+          PY
 
-  - name: Upload APK
-    uses: actions/upload-artifact@v4
-    with:
-      name: bilipink-apk
-      path: bin/*.apk
-      if-no-files-found: error
-      retention-days: 14
+      - name: Build BiliPink APK
+        shell: bash
+        env:
+          GRADLE_OPTS: >-
+            -Dorg.gradle.daemon=false
+            -Dorg.gradle.jvmargs=-Xmx2048m
+            -XX:MaxMetaspaceSize=512m
+        run: |
+          buildozer -v android debug
 
-  - name: Upload buildozer log
-    if: always()
-    uses: actions/upload-artifact@v4
-    with:
-      name: buildozer-full-log
-      path: |
-        ~/.buildozer/build.log
-        .buildozer/android/platform/build-*/dists/*/build.log
-      if-no-files-found: ignore
-      retention-days: 7
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilipink-apk
+          path: bin/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilipink-build-logs
+          path: |
+            ~/.buildozer/build.log
+            .buildozer/android/platform/build-*/dists/*/build.log
+          if-no-files-found: ignore
+          retention-days: 7
