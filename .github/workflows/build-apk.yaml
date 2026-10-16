@@ -21,14 +21,15 @@ jobs:
       - name: Fix Git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Check Buildozer configuration
+      - name: Check project files
         run: |
           test -f buildozer.spec
           test -f main.py
           buildozer --version
 
       - name: Build APK
-        run: buildozer android debug --log-level 2
+        run: |
+          yes y | buildozer android debug --log-level 2
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
