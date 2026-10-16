@@ -1,25 +1,39 @@
-name: BiliPink_DOCKER_ONEHIT
+name: BiliPink_OFFICIAL_IMAGE
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build_apk:
+  build:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/kivy/buildozer:latest
+
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v7
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # 现成封好的Buildozer镜像，环境全部焊死！不需要手动装SDK/p4a！
-      - name: Build APK via prebuilt buildozer container
-        uses: ArtemSBulgakov/buildozer-action@v1
-        with:
-          buildozer_command: android debug
-          # 镜像内锁死：buildozer1.5.0 + p4a v2023.09.04 + NDK25b + python3.10
-          python_version: '3.10'
+      - name: Fix Git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Download result APK
+      - name: Check Buildozer configuration
+        run: |
+          test -f buildozer.spec
+          test -f main.py
+          buildozer --version
+
+      - name: Build APK
+        run: buildozer android debug --log-level 2
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: BiliPink_APK
+          name: BiliPink_FINAL
           path: bin/*.apk
+          if-no-files-found: error
+          compression-level: 0
