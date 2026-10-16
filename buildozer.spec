@@ -8,7 +8,7 @@ source.include_dirs = fonts
 version = 1.0
 
 android.api = 33
-android.ndk = 25.2.9519653
+android.ndk = r28c
 android.build_tools = 33.0.2
 android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
 android.archs = arm64-v8a
@@ -18,8 +18,8 @@ orientation = portrait
 fullscreen = 0
 
 [p4a.env]
-P4A_SDK = %(ANDROID_HOME)s
-P4A_ANDROID_NDK = %(ANDROID_HOME)s/ndk/25.2.9519653
+P4A_SDK = ${{github.workspace}}/android-sdk
+P4A_ANDROID_NDK = ${{github.workspace}}/android-ndk-r28c
 
 [buildozer]
 log_level = 2
