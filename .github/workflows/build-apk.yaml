@@ -45,8 +45,10 @@ jobs:
           rm -rf "$HOME/.buildozer"
           mkdir -p "$HOME/.buildozer"
           rm -rf "$ANDROID_HOME"
+          # 预先建立licenses文件夹
+          mkdir -p "$ANDROID_HOME/licenses"
 
-      - name: Download Android SDK and accept licenses
+      - name: Download Android SDK + Pre‑accept Licenses（关键修复）
         shell: bash
         run: |
           set -euo pipefail
@@ -58,8 +60,9 @@ jobs:
           mkdir -p latest
           mv cmdline-tools/* latest/
 
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            --sdk_root="$ANDROID_HOME" --licenses
+          # ✅ 不用 yes | --licenses！直接写入谷歌官方许可hash
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
 
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             --sdk_root="$ANDROID_HOME" \
@@ -73,9 +76,9 @@ jobs:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v5-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v6-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v5-${{ runner.os }}-
+            bilipink-sdk-v6-${{ runner.os }}-
 
       - name: Install system dependencies
         shell: bash
