@@ -21,8 +21,10 @@ requirements = python3==3.11,kivy==2.3.1,kivymd==1.2.0,requests,yt-dlp==2026.3.2
 orientation = portrait
 fullscreen = 0
 
+[p4a.env]
+P4A_ANDROID_NDK = ${{github.workspace}}/android-ndk-r25b
+
 [buildozer]
 log_level = 2
 warn_on_root = 0
 android.accept_sdk_license = true
-env = P4A_DOWNLOAD_HOST=https://mirrors.aliyun.com/android
