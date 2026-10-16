@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-
   workflow_dispatch:
 
 jobs:
@@ -18,17 +17,48 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fix Git safe directory
+      - name: Fix Git
         run: |
           git config --global --add safe.directory '*'
 
-      - name: Build BiliPink APK
-        env:
-          BUILDOZER_WARN_ON_ROOT: "0"
+      - name: Check project
         run: |
-          buildozer android debug --log-level 1
+          echo "===== PROJECT ====="
+          ls -la
+          echo "===== PYTHON ====="
+          python3 --version
+          echo "===== BUILDOZER ====="
+          buildozer --version
+
+      - name: Clean old build
+        run: |
+          rm -rf .buildozer
+          rm -rf bin
+
+      - name: Build APK
+        run: |
+          mkdir -p build-log
+          set -o pipefail
+          buildozer android debug --log-level 2 2>&1 | tee build-log/build.log
+
+      - name: Show failure tail
+        if: failure()
+        run: |
+          echo "=============================="
+          echo "LAST 300 LINES"
+          echo "=============================="
+          tail -n 300 build-log/build.log || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BiliPink_build_log
+          path: build-log/build.log
+          if-no-files-found: warn
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: BiliPink_APK
