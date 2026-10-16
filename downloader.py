@@ -1,168 +1,202 @@
 # -*- coding: utf-8 -*-
-"""BiliPink downloader.
-Pure urllib implementation.
-No yt-dlp dependency.
-"""
+"""BiliPink downloader with Android ARM64 FFmpeg support."""
 
 import os
 import re
+import shutil
+import subprocess
 import urllib.request
 
 
-UA = (
+USER_AGENT = (
     "Mozilla/5.0 (Linux; Android 14) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/125.0.0.0 Mobile Safari/537.36"
+    "AppleWebKit/537.36 Chrome/125.0.0.0 Mobile Safari/537.36"
 )
 
 
 def safe_filename(name):
-    name = str(
-        name or "BiliPink Video"
-    )
-
-    name = re.sub(
-        r'[\\/:*?"<>|\x00-\x1F]',
-        "_",
-        name
-    )
-
-    name = re.sub(
-        r"\s+",
-        " ",
-        name
-    ).strip(" .")
-
-    if len(name) > 96:
-        name = name[:96]
-
-    return name or "BiliPink Video"
+    name = str(name or "video").strip()
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name)
+    name = name.strip(" .")
+    return (name or "video")[:160]
 
 
 def _headers():
     return {
-        "User-Agent": UA,
+        "User-Agent": USER_AGENT,
         "Referer": "https://www.bilibili.com/",
-        "Accept": "*/*",
     }
+
+
+def get_ffmpeg_path():
+    """Find FFmpeg in the app-private directory."""
+    candidates = []
+
+    try:
+        from kivy.app import App
+        app = App.get_running_app()
+        if app:
+            candidates.extend([
+                os.path.join(app.user_data_dir, "ffmpeg"),
+                os.path.join(app.user_data_dir, "bin", "ffmpeg"),
+                os.path.join(app.directory, "ffmpeg"),
+            ])
+    except Exception:
+        pass
+
+    candidates.extend([
+        "/data/data/org.bilipink/files/ffmpeg",
+        "/data/data/org.bilipink/files/bin/ffmpeg",
+        "/data/data/org.bilipink/cache/ffmpeg",
+    ])
+
+    for path in candidates:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+
+    # This only works when FFmpeg is available on PATH.
+    return shutil.which("ffmpeg")
+
+
+def install_ffmpeg_from_assets():
+    """
+    Extract assets/ffmpeg from the APK into the app-private directory.
+    Must be called from the app after Kivy has initialized.
+    """
+    from kivy.app import App
+
+    app = App.get_running_app()
+    if app is None:
+        raise RuntimeError("应用尚未启动，无法安装 FFmpeg")
+
+    target = os.path.join(app.user_data_dir, "ffmpeg")
+    os.makedirs(app.user_data_dir, exist_ok=True)
+
+    if os.path.isfile(target) and os.access(target, os.X_OK):
+        return target
+
+    if not hasattr(app, "user_data_dir"):
+        raise RuntimeError("无法获取应用私有目录")
+
+    try:
+        from jnius import autoclass
+
+        PythonActivity = autoclass(
+            "org.kivy.android.PythonActivity"
+        )
+        activity = PythonActivity.mActivity
+        stream = activity.getAssets().open("ffmpeg")
+
+        temp = target + ".tmp"
+        try:
+            with open(temp, "wb") as output:
+                buffer = bytearray(8192)
+                while True:
+                    count = stream.read(buffer)
+                    if count is None or count <= 0:
+                        break
+                    output.write(buffer[:count])
+        finally:
+            stream.close()
+
+        os.replace(temp, target)
+        os.chmod(target, 0o700)
+
+        # Validate that the executable can run.
+        result = subprocess.run(
+            [target, "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "FFmpeg 启动失败："
+                + (result.stdout or "")[-1000:]
+            )
+
+        return target
+
+    except Exception as exc:
+        try:
+            if os.path.exists(target + ".tmp"):
+                os.remove(target + ".tmp")
+        except Exception:
+            pass
+
+        raise RuntimeError(
+            "无法从 APK 资源安装 FFmpeg。"
+            "请确认 assets/ffmpeg 已打包且适用于 Android ARM64。"
+            f"详细信息：{exc}"
+        ) from exc
 
 
 def download_stream(
     url,
     output_path,
     progress=None,
-    cancel_check=None
+    cancel_check=None,
 ):
-    out_dir = os.path.dirname(output_path)
+    """Download a single media stream to a .part file."""
+    if not url:
+        raise ValueError("下载地址为空")
 
-    if out_dir:
-        os.makedirs(
-            out_dir,
-            exist_ok=True
-        )
+    output_path = os.path.abspath(output_path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    temp_path = output_path + ".part"
 
-    temp = output_path + ".part"
-
-    req = urllib.request.Request(
+    request = urllib.request.Request(
         url,
-        headers=_headers()
+        headers=_headers(),
     )
 
+    downloaded = 0
+
     try:
-        with urllib.request.urlopen(
-            req,
-            timeout=48
-        ) as rsp:
-
-            status = getattr(
-                rsp,
-                "status",
-                200
-            )
-
-            if not (
-                200 <= status < 300
-            ):
-                raise RuntimeError(
-                    "HTTP {}: Bilibili rejected the request."
-                    .format(status)
-                )
-
-            content_type = (
-                rsp.headers.get(
-                    "Content-Type"
-                ) or ""
-            ).lower()
-
-            if (
-                "text/html" in content_type
-                or "application/json" in content_type
-            ):
-                raise RuntimeError(
-                    "The returned data is not a video. "
-                    "Please parse the video again."
-                )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            status = getattr(response, "status", 200)
+            if status and status >= 400:
+                raise RuntimeError(f"下载失败，HTTP {status}")
 
             total = int(
-                rsp.headers.get(
-                    "Content-Length"
-                ) or 0
+                response.headers.get("Content-Length", "0") or 0
             )
 
-            done = 0
-
-            with open(
-                temp,
-                "wb"
-            ) as f:
-
+            with open(temp_path, "wb") as output:
                 while True:
+                    if callable(cancel_check) and cancel_check():
+                        raise InterruptedError("下载已取消")
 
-                    if (
-                        cancel_check
-                        and cancel_check()
-                    ):
-                        raise InterruptedError(
-                            "Download cancelled."
-                        )
-
-                    chunk = rsp.read(
-                        256 * 1024
-                    )
-
+                    chunk = response.read(256 * 1024)
                     if not chunk:
                         break
 
-                    f.write(chunk)
-                    done += len(chunk)
+                    output.write(chunk)
+                    downloaded += len(chunk)
 
-                    if progress:
-                        progress(
-                            done,
-                            total
-                        )
+                    if callable(progress):
+                        try:
+                            progress(downloaded, total)
+                        except TypeError:
+                            percent = (
+                                int(downloaded * 100 / total)
+                                if total > 0 else 0
+                            )
+                            progress(percent)
 
-        if done <= 1024:
-            raise RuntimeError(
-                "Downloaded file is too small. "
-                "The link may have expired."
-            )
+        if downloaded <= 0:
+            raise RuntimeError("下载结果为空")
 
-        os.replace(
-            temp,
-            output_path
-        )
-
+        os.replace(temp_path, output_path)
         return output_path
 
     except Exception:
-
         try:
-            if os.path.exists(temp):
-                os.remove(temp)
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         except Exception:
             pass
-
         raise
 
 
@@ -172,152 +206,86 @@ def download_dash(
     video_path,
     audio_path,
     progress=None,
-    cancel_check=None
+    cancel_check=None,
 ):
-    """Download DASH video and audio separately.
-
-    progress receives:
-        done_bytes, total_bytes
-    """
-
-    video_done = 0
-    video_total = 0
-
-    audio_done = 0
-    audio_total = 0
-
-    def video_progress(done, total):
-        nonlocal video_done, video_total
-
-        video_done = done
-        video_total = total
-
-        _report_progress()
-
-    def audio_progress(done, total):
-        nonlocal audio_done, audio_total
-
-        audio_done = done
-        audio_total = total
-
-        _report_progress()
-
-    def _report_progress():
-        total = video_total + audio_total
-        done = video_done + audio_done
-
-        if progress:
-            progress(
-                done,
-                total
-            )
-
-    try:
-
-        download_stream(
-            video_url,
-            video_path,
-            progress=video_progress,
-            cancel_check=cancel_check
-        )
-
-        download_stream(
-            audio_url,
-            audio_path,
-            progress=audio_progress,
-            cancel_check=cancel_check
-        )
-
-        return {
-            "video_path": video_path,
-            "audio_path": audio_path
-        }
-
-    except Exception:
-
-        for path in (
-            video_path,
-            audio_path
-        ):
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except Exception:
-                pass
-
-        raise
-
-
-def merge_mp4(
-    video_path,
-    audio_path,
-    output_path
-):
-    """Merge MP4 video/audio using Android ffmpeg if available.
-
-    This function does not require ffmpeg during normal
-    Python import. It searches common Android executable
-    locations.
-    """
-
-    import subprocess
-
-    ffmpeg_candidates = [
-        "/data/data/org.bilipink/files/ffmpeg",
-        "/data/data/org.bilipink/files/bin/ffmpeg",
-        "/data/data/org.bilipink/cache/ffmpeg",
-    ]
-
-    ffmpeg = None
-
-    for candidate in ffmpeg_candidates:
-        if os.path.isfile(candidate):
-            ffmpeg = candidate
-            break
-
-    if not ffmpeg:
-        raise RuntimeError(
-            "FFmpeg is not included in this build. "
-            "DASH video and audio were downloaded separately."
-        )
-
-    out_dir = os.path.dirname(output_path)
-
-    if out_dir:
-        os.makedirs(
-            out_dir,
-            exist_ok=True
-        )
-
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-i",
+    """Download DASH video and audio streams separately."""
+    download_stream(
+        video_url,
         video_path,
-        "-i",
-        audio_path,
-        "-c",
-        "copy",
-        "-movflags",
-        "+faststart",
-        output_path,
-    ]
-
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        progress=progress,
+        cancel_check=cancel_check,
     )
 
-    if result.returncode != 0:
-        error = result.stderr.decode(
-            "utf-8",
-            "replace"
-        )
+    download_stream(
+        audio_url,
+        audio_path,
+        progress=progress,
+        cancel_check=cancel_check,
+    )
 
+    return video_path, audio_path
+
+
+def merge_mp4(video_path, audio_path, output_path):
+    """Merge video and audio using FFmpeg stream copy."""
+    if not os.path.isfile(video_path):
+        raise FileNotFoundError("找不到视频流文件：" + video_path)
+
+    if not os.path.isfile(audio_path):
+        raise FileNotFoundError("找不到音频流文件：" + audio_path)
+
+    ffmpeg = get_ffmpeg_path()
+    if not ffmpeg:
         raise RuntimeError(
-            "FFmpeg merge failed: "
-            + error[-1500:]
+            "没有找到 FFmpeg。请先在应用启动时调用 "
+            "install_ffmpeg_from_assets()。"
         )
 
-    return output_path
+    output_path = os.path.abspath(output_path)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    temp_output = output_path + ".part.mp4"
+
+    command = [
+        ffmpeg,
+        "-y",
+        "-i", video_path,
+        "-i", audio_path,
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c", "copy",
+        "-movflags", "+faststart",
+        temp_output,
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=1800,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                "FFmpeg 合并失败：\n"
+                + (result.stdout or "")[-3000:]
+            )
+
+        if not os.path.isfile(temp_output):
+            raise RuntimeError("FFmpeg 没有生成输出文件")
+
+        if os.path.getsize(temp_output) <= 0:
+            raise RuntimeError("合并结果为空文件")
+
+        os.replace(temp_output, output_path)
+        return output_path
+
+    except Exception:
+        try:
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
+        except Exception:
+            pass
+        raise
