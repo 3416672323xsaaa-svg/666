@@ -16,6 +16,7 @@ env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
   CYTHON_LANGUAGE_LEVEL: '3'
+  BUILDOZER_ANDROID_SDK: ${{ github.workspace }}/android-sdk
 
 jobs:
   build-apk:
@@ -64,7 +65,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Prepare build directories & license folder
+      - name: Prepare folders + ALL license hashes pre‑written
         shell: bash
         run: |
           set -e
@@ -74,7 +75,13 @@ jobs:
           mkdir -p "$ANDROID_HOME/licenses"
           mkdir -p "$ANDROID_HOME/cmdline-tools"
 
-      - name: Download Android SDK + Hardcode license hashes ✅许可焊死
+          # 全部全套官方许可哈希
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo "d975f751698a77b662f1254ddbeed3901f976be5" > "$ANDROID_HOME/licenses/android-sdk-license-5be876d5"
+          echo "813888b925a5d7c2f0bd221c1bb83411f5072c1e" > "$ANDROID_HOME/licenses/android-sdk-license-d9534051"
+
+      - name: Download SDK cmdline tools
         shell: bash
         run: |
           set -euo pipefail
@@ -83,35 +90,33 @@ jobs:
           unzip -q commandline-tools.zip
           mv cmdline-tools latest
           rm -f commandline-tools.zip
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          echo "d975f751698a77b662f1254ddbeed3901f976be5" > "$ANDROID_HOME/licenses/android-sdk-license-5be876d5"
-
-          # PATH在这里动态注入，而不是env块里自引用！
+      - name: Install ONLY exactly what we need ❗无--update！
+        shell: bash
+        run: |
+          set -e
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          sdkmanager --sdk_root="$ANDROID_HOME" --update
-          sdkmanager --sdk_root="$ANDROID_HOME" \
+          yes | sdkmanager --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
             "platforms;android-33" \
             "build-tools;33.0.2"
 
-      - name: Put SDK bin into global PATH ✅正确的加PATH方式
-        shell: bash
-        run: |
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          # 强制清除任何意外下载出来的 build‑tools37
+          rm -rf "$ANDROID_HOME/build-tools/37.0.0"
+          ls -la "$ANDROID_HOME/build-tools/"
 
-      - name: Cache Android SDK and Buildozer workdir
+      - name: Cache SDK + Buildozer (key v12)
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v11-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v12-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v11-${{ runner.os }}-
+            bilipink-sdk-v12-${{ runner.os }}-
 
-      - name: Install Python packages & P4A develop
+      - name: Install Python packages & p4a develop
         shell: bash
         run: |
           set -e
@@ -123,13 +128,13 @@ jobs:
           python -m pip install \
             'git+https://github.com/kivy/python-for-android.git@develop'
 
-      - name: Print tool versions
+      - name: Print versions
         shell: bash
         run: |
           buildozer --version
-          python -c "import Cython, certifi; print('Cython:', Cython.__version__); print('certifi:', certifi.__version__)"
           java -version
           sdkmanager --version
+          ls "$ANDROID_HOME/build-tools/"
 
       - name: Check project files and fonts folder
         shell: bash
@@ -142,7 +147,7 @@ jobs:
           if [ "$FONT_COUNT" -eq 0 ]; then echo "::error::fonts里面没有ttf/otf字体"; exit 1; fi
           echo "✅ OK: Found $FONT_COUNT font file(s)"
 
-      - name: Check all *.py syntax & UTF‑8
+      - name: Check *.py syntax UTF‑8
         shell: bash
         run: |
           set -e
@@ -156,7 +161,7 @@ jobs:
               print("OK", f.name)
           PY
 
-      - name: Build BiliPink APK
+      - name: Build APK（传给buildozer固定SDK路径，不许它自己下载另一套！）
         shell: bash
         env:
           GRADLE_OPTS: >-
@@ -164,7 +169,7 @@ jobs:
             -Dorg.gradle.jvmargs=-Xmx2048m
             -XX:MaxMetaspaceSize=512m
         run: |
-          buildozer -v android debug
+          buildozer android debug --android-sdk $ANDROID_HOME
 
       - name: Upload final APK
         uses: actions/upload-artifact@v4
@@ -174,7 +179,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload all build logs (always run)
+      - name: Upload all logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
@@ -183,4 +188,4 @@ jobs:
             ~/.buildozer/build.log
             ~/.buildozer/android/platform/build-*/dists/*/build.log
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days:7
