@@ -15,7 +15,6 @@ env:
   P4A_ALLOW_TLS_13: '1'
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-  # 新增：强制p4a读取同一个SDK路径
   P4A_SDK: ${{ github.workspace }}/android-sdk
   BUILDOZER_ANDROID_SDK: ${{ github.workspace }}/android-sdk
   CYTHON_LANGUAGE_LEVEL: '3'
@@ -30,31 +29,12 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Install system dependencies FIRST
+      - name: Install system dependencies
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           sudo apt-get update -y
-          sudo apt-get install -y \
-            automake \
-            libltdl-dev \
-            zip \
-            unzip \
-            openjdk-17-jdk \
-            git \
-            pkg-config \
-            libffi-dev \
-            libssl-dev \
-            autoconf \
-            build-essential \
-            cmake \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            libtinfo5 \
-            gettext \
-            autopoint \
-            wget
+          sudo apt-get install -y automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf build-essential cmake zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 gettext autopoint wget
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -67,128 +47,105 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Prepare folders + ALL license hashes (NO yes pipe!)
+      - name: Install Python packages and python-for-android develop
         shell: bash
         run: |
-          set -e
-          rm -rf "$HOME/.buildozer"
-          mkdir -p "$HOME/.buildozer"
-          rm -rf "$ANDROID_HOME"
-          mkdir -p "$ANDROID_HOME/licenses"
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          set -euo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install 'Cython==3.0.11' 'buildozer==1.5.0' certifi
+          python -m pip install 'git+https://github.com/kivy/python-for-android.git@develop'
 
-          # Buildozer / p4a 偷偷自己用的私有SDK目录（之前缺失）
+      - name: Prepare Android SDK directories and licenses
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$ANDROID_HOME"
+          mkdir -p "$ANDROID_HOME/licenses" "$ANDROID_HOME/cmdline-tools"
           BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
           rm -rf "$BUI_SDK"
-          mkdir -p "$BUI_SDK/licenses"
-          mkdir -p "$BUI_SDK/cmdline-tools"
-
+          mkdir -p "$BUI_SDK/licenses" "$BUI_SDK/cmdline-tools"
           L1="24333f8a63b6825ea9c5514f83c2829b004d1fee"
           L2="84831b9409646a918e30573bab4c9c91346d8abd"
           L3="d975f751698a77b662f1254ddbeed3901f976be5"
           L4="813888b925a5d7c2f0bd221c1bb83411f5072c1e"
+          for SDK_DIR in "$ANDROID_HOME" "$BUI_SDK"; do
+            mkdir -p "$SDK_DIR/licenses"
+            printf '%s\n' "$L1" > "$SDK_DIR/licenses/android-sdk-license"
+            printf '%s\n' "$L2" > "$SDK_DIR/licenses/android-sdk-preview-license"
+            printf '%s\n' "$L3" > "$SDK_DIR/licenses/android-sdk-license-5be876d5"
+            printf '%s\n' "$L4" > "$SDK_DIR/licenses/android-sdk-license-d9534051"
+          done
 
-          # 主SDK写入许可
-          echo "$L1" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo "$L2" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          echo "$L3" > "$ANDROID_HOME/licenses/android-sdk-license-5be876d5"
-          echo "$L4" > "$ANDROID_HOME/licenses/android-sdk-license-d9534051"
-
-          # Buildozer私有SDK同步写入完全一样许可
-          echo "$L1" > "$BUI_SDK/licenses/android-sdk-license"
-          echo "$L2" > "$BUI_SDK/licenses/android-sdk-preview-license"
-          echo "$L3" > "$BUI_SDK/licenses/android-sdk-license-5be876d5"
-          echo "$L4" > "$BUI_SDK/licenses/android-sdk-license-d9534051"
-
-      - name: Download SDK cmdline tools
+      - name: Download Android command-line tools
         shell: bash
         run: |
           set -euo pipefail
-          cd "$ANDROID_HOME/cmdline-tools"
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O commandline-tools.zip
+          TMP_DIR="$(mktemp -d)"
+          cd "$TMP_DIR"
+          wget -q --show-progress https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O commandline-tools.zip
           unzip -q commandline-tools.zip
-          mv cmdline-tools latest
-          rm -f commandline-tools.zip
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          mkdir -p "$ANDROID_HOME/cmdline-tools/latest"
+          cp -a cmdline-tools/. "$ANDROID_HOME/cmdline-tools/latest/"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          rm -rf "$TMP_DIR"
 
-      - name: Install ONLY exactly what we need ❗REMOVED yes |
+      - name: Install Android SDK packages and sync Buildozer SDK
         shell: bash
         run: |
-          set -e
-          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          sdkmanager --sdk_root="$ANDROID_HOME" --verbose \
-            "platform-tools" \
-            "platforms;android-33" \
-            "build-tools;33.0.2"
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+          BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
+          mkdir -p "$BUI_SDK"
+          cp -a "$ANDROID_HOME/." "$BUI_SDK/"
+          # Buildozer 1.5.0 checks the legacy tools/bin/sdkmanager path.
+          mkdir -p "$BUI_SDK/tools/bin" "$ANDROID_HOME/tools/bin"
+          ln -sf "$BUI_SDK/cmdline-tools/latest/bin/sdkmanager" "$BUI_SDK/tools/bin/sdkmanager"
+          ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"
+          test -x "$BUI_SDK/tools/bin/sdkmanager"
+          test -d "$BUI_SDK/platforms/android-33"
+          test -d "$BUI_SDK/build-tools/33.0.2"
+          echo '=== Workspace SDK ==='
+          ls -la "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/build-tools/"
+          echo '=== Buildozer SDK ==='
+          ls -la "$BUI_SDK/tools/bin/sdkmanager" "$BUI_SDK/build-tools/"
 
-          rm -rf "$ANDROID_HOME/build-tools/37.0.0"
-          rm -rf "$ANDROID_HOME/platforms/android-13"
-
-          # ✅关键一步：把整套装好的SDK完整复制到buildozer私有目录，阻止它自行下载
-          cp -r "$ANDROID_HOME"/* "$HOME/.buildozer/android/platform/android-sdk/"
-
-          # 二次清扫私有路径里意外出现的37版本
-          rm -rf "$HOME/.buildozer/android/platform/android-sdk/build-tools/37.0.0"
-
-          ls -la "$ANDROID_HOME/build-tools/"
-          ls -la "$HOME/.buildozer/android/platform/android-sdk/build-tools/"
-
-      - name: Cache SDK + Buildozer (KEY v18 — MUST CLEAR OLD CACHE!)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.buildozer
-            ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v18-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            bilipink-sdk-v18-${{ runner.os }}-
-
-      - name: Install Python packages & p4a develop
+      - name: Print tool versions
         shell: bash
         run: |
-          set -e
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install \
-            'Cython==3.0.11' \
-            'buildozer==1.5.0' \
-            certifi
-          python -m pip install \
-            'git+https://github.com/kivy/python-for-android.git@develop'
-
-      - name: Print versions
-        shell: bash
-        run: |
+          set -euo pipefail
           buildozer --version
           java -version
-          sdkmanager --version
-          echo "=== Main SDK build-tools ==="
-          ls "$ANDROID_HOME/build-tools/"
-          echo "=== Buildozer internal SDK build-tools ==="
-          ls "$HOME/.buildozer/android/platform/android-sdk/build-tools/"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
+          python -m pip show python-for-android || true
 
       - name: Check project files and fonts folder
         shell: bash
         run: |
-          set -e
-          test -f buildozer.spec || { echo "::error::buildozer.spec missing"; exit 1; }
-          test -f main.py || { echo "::error::main.py missing"; exit 1; }
-          if [ ! -d fonts ]; then echo "::error::fonts folder missing"; exit 1; fi
-          FONT_COUNT=$(find fonts -maxdepth 2 -type f -iname '*.ttf' -o -iname '*.otf' | wc -l)
-          if [ "$FONT_COUNT" -eq 0 ]; then echo "::error::fonts里面没有ttf/otf字体"; exit 1; fi
-          echo "✅ OK: Found $FONT_COUNT font file(s)"
+          set -euo pipefail
+          test -f buildozer.spec || { echo '::error::buildozer.spec missing'; exit 1; }
+          test -f main.py || { echo '::error::main.py missing'; exit 1; }
+          test -d fonts || { echo '::error::fonts folder missing'; exit 1; }
+          FONT_COUNT="$(find fonts -maxdepth 2 -type f \( -iname '*.ttf' -o -iname '*.otf' \) | wc -l)"
+          if [ "$FONT_COUNT" -eq 0 ]; then echo '::error::fonts folder contains no .ttf or .otf files'; exit 1; fi
+          echo "Found $FONT_COUNT font file(s)"
 
-      - name: Check *.py syntax UTF‑8
+      - name: Check Python syntax and UTF-8
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          files = sorted(Path(".").glob("*.py"))
-          if not files: raise SystemExit("No Python source files found!")
+          files = sorted(Path('.').glob('*.py'))
+          if not files:
+              raise SystemExit('No Python source files found!')
           for f in files:
-              src = f.read_text("utf-8")
-              compile(src, str(f), "exec")
-              print("OK", f.name)
+              src = f.read_text(encoding='utf-8')
+              compile(src, str(f), 'exec')
+              print('OK', f.name)
           PY
 
       - name: Build APK
@@ -199,7 +156,8 @@ jobs:
             -Dorg.gradle.jvmargs=-Xmx2048m
             -XX:MaxMetaspaceSize=512m
         run: |
-          buildozer android debug --android-sdk "$ANDROID_HOME"
+          set -euo pipefail
+          buildozer android debug
 
       - name: Upload final APK
         uses: actions/upload-artifact@v4
@@ -209,7 +167,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload all logs
+      - name: Upload build logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
