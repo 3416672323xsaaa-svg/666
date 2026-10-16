@@ -7,11 +7,11 @@ source.dir = .
 source.include_exts = py,png,jpg,jpeg,ttf,otf,kv,atlas,json,xml,java
 source.include_patterns = assets/*,fonts/*,src/*
 
-version = 2.5.0
+version = 2.5.1
 orientation = portrait
 fullscreen = 0
 
-requirements = python3,kivy==2.3.0,kivymd==1.1.1,pillow,pyjnius
+requirements = python3,kivy==2.3.0,kivymd==1.1.1,pillow,pyjnius,certifi
 
 android.api = 33
 android.minapi = 24
@@ -20,7 +20,6 @@ android.archs = arm64-v8a
 
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_MEDIA_VIDEO,READ_MEDIA_IMAGES
 
-# 将原生 Java 源码加入 Android 工程
 android.add_src = src
 
 android.debuggable = True
