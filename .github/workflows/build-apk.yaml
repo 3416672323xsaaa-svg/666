@@ -20,8 +20,9 @@ jobs:
     timeout-minutes: 120
 
     env:
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      ANDROID_HOME: /usr/local/lib/android/sdk
+      # Buildozer and this workflow must use exactly the same SDK location.
+      ANDROID_SDK_ROOT: /home/runner/.buildozer/android/platform/android-sdk
+      ANDROID_HOME: /home/runner/.buildozer/android/platform/android-sdk
       P4A_USE_CERTIFI: "0"
       CYTHON_LANGUAGE_LEVEL: "3"
       GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.parallel=false"
@@ -49,18 +50,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y             build-essential git zip unzip wget curl             autoconf automake libtool pkg-config             cmake ninja-build ccache             libffi-dev libssl-dev zlib1g-dev             libncurses5-dev libncursesw5-dev libtinfo6 gettext
 
-      - name: Prepare writable Android SDK and accept licenses
+      - name: Install Buildozer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install "Cython==0.29.36" "buildozer==1.5.0"
+
+      - name: Bootstrap Buildozer SDK and accept licenses
         shell: bash
         run: |
           set -euxo pipefail
 
-          # Use a runner-owned SDK directory so no chmod is attempted on
-          # protected preinstalled SDK files.
-          SDK="$RUNNER_TEMP/android-sdk"
+          SDK="$ANDROID_SDK_ROOT"
           mkdir -p "$SDK/cmdline-tools"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
 
+          # Install Google's command-line tools into Buildozer's own SDK path.
           TMP="$(mktemp -d)"
           cd "$TMP"
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O tools.zip
@@ -70,21 +75,19 @@ jobs:
 
           SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
           test -f "$SDKMANAGER"
-          bash "$SDKMANAGER" --sdk_root="$SDK" --version
 
+          # sdkmanager is a Java script; invoke through bash so executable-bit
+          # differences do not cause the earlier chmod permission error.
           yes | bash "$SDKMANAGER" --sdk_root="$SDK" --licenses || true
-          bash "$SDKMANAGER" --sdk_root="$SDK"             "platform-tools"             "platforms;android-33"             "build-tools;33.0.2"
 
+          bash "$SDKMANAGER" --sdk_root="$SDK"             "platform-tools"             "platforms;android-33"             "build-tools;33.0.2"             "build-tools;37.0.0"
+
+          # Check both the pinned API-33 tools and the build-tools version
+          # requested in the reported error.
           test -x "$SDK/platform-tools/adb"
           test -d "$SDK/platforms/android-33"
           test -x "$SDK/build-tools/33.0.2/aidl"
-
-      - name: Install Buildozer
-        shell: bash
-        run: |
-          set -euxo pipefail
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install "Cython==0.29.36" "buildozer==1.5.0"
+          test -x "$SDK/build-tools/37.0.0/aidl"
 
       - name: Check project files
         shell: bash
