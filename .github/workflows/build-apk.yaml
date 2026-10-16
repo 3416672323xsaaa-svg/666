@@ -75,7 +75,6 @@ jobs:
           mkdir -p "$ANDROID_HOME/licenses"
           mkdir -p "$ANDROID_HOME/cmdline-tools"
 
-          # 全部全套官方许可哈希
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
           echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
           echo "d975f751698a77b662f1254ddbeed3901f976be5" > "$ANDROID_HOME/licenses/android-sdk-license-5be876d5"
@@ -92,7 +91,7 @@ jobs:
           rm -f commandline-tools.zip
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
-      - name: Install ONLY exactly what we need ❗无--update！
+      - name: Install ONLY exactly what we need
         shell: bash
         run: |
           set -e
@@ -102,19 +101,18 @@ jobs:
             "platforms;android-33" \
             "build-tools;33.0.2"
 
-          # 强制清除任何意外下载出来的 build‑tools37
           rm -rf "$ANDROID_HOME/build-tools/37.0.0"
           ls -la "$ANDROID_HOME/build-tools/"
 
-      - name: Cache SDK + Buildozer (key v12)
+      - name: Cache SDK + Buildozer (key v13r1)
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v12-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v13r1-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v12-${{ runner.os }}-
+            bilipink-sdk-v13r1-${{ runner.os }}-
 
       - name: Install Python packages & p4a develop
         shell: bash
@@ -161,7 +159,7 @@ jobs:
               print("OK", f.name)
           PY
 
-      - name: Build APK（传给buildozer固定SDK路径，不许它自己下载另一套！）
+      - name: Build APK
         shell: bash
         env:
           GRADLE_OPTS: >-
@@ -169,7 +167,7 @@ jobs:
             -Dorg.gradle.jvmargs=-Xmx2048m
             -XX:MaxMetaspaceSize=512m
         run: |
-          buildozer android debug --android-sdk $ANDROID_HOME
+          buildozer android debug --android-sdk "$ANDROID_HOME"
 
       - name: Upload final APK
         uses: actions/upload-artifact@v4
@@ -188,4 +186,4 @@ jobs:
             ~/.buildozer/build.log
             ~/.buildozer/android/platform/build-*/dists/*/build.log
           if-no-files-found: ignore
-          retention-days:7
+          retention-days: 7
