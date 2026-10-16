@@ -45,10 +45,9 @@ jobs:
           rm -rf "$HOME/.buildozer"
           mkdir -p "$HOME/.buildozer"
           rm -rf "$ANDROID_HOME"
-          # 预先建立licenses文件夹
           mkdir -p "$ANDROID_HOME/licenses"
 
-      - name: Download Android SDK + Pre‑accept Licenses（关键修复）
+      - name: Download Android SDK + Pre‑accept Licenses
         shell: bash
         run: |
           set -euo pipefail
@@ -60,7 +59,6 @@ jobs:
           mkdir -p latest
           mv cmdline-tools/* latest/
 
-          # ✅ 不用 yes | --licenses！直接写入谷歌官方许可hash
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
           echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
 
@@ -76,9 +74,9 @@ jobs:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v6-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v7-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v6-${{ runner.os }}-
+            bilipink-sdk-v7-${{ runner.os }}-
 
       - name: Install system dependencies
         shell: bash
@@ -114,8 +112,9 @@ jobs:
             'Cython==3.0.11' \
             'buildozer==1.5.0' \
             certifi
+          # ✅ tag不带v：2024.12
           python -m pip install \
-            'git+https://github.com/kivy/python-for-android.git@v2024.12'
+            'git+https://github.com/kivy/python-for-android.git@2024.12'
 
       - name: Print tool versions
         shell: bash
@@ -124,57 +123,29 @@ jobs:
           python -c "import Cython, certifi; print('Cython:', Cython.__version__); print('certifi:', certifi.__version__)"
           java -version
 
-      - name: Check project files and OTF fonts
+      - name: Check project files and fonts
         shell: bash
         run: |
           set -e
+          test -f buildozer.spec || { echo "::error::buildozer.spec missing"; exit 1; }
+          test -f main.py || { echo "::error::main.py missing"; exit 1; }
+          if [ ! -d fonts ]; then echo "::error::fonts folder missing"; exit 1; fi
+          FONT_COUNT=$(find fonts -maxdepth 2 -type f -iname '*.ttf' -o -iname '*.otf' | wc -l)
+          if [ "$FONT_COUNT" -eq 0 ]; then echo "::error::fonts里面没有ttf/otf字体"; exit 1; fi
+          echo "OK: Found $FONT_COUNT font file(s)"
 
-          test -f buildozer.spec || {
-            echo "::error::buildozer.spec is missing"
-            exit 1
-          }
-
-          test -f main.py || {
-            echo "::error::main.py is missing"
-            exit 1
-          }
-
-          echo "===== Repository root ====="
-          ls -la
-
-          if [ ! -d fonts ]; then
-            echo "::error::fonts folder is missing"
-            exit 1
-          fi
-
-          echo "===== OTF font files ====="
-          find fonts -type f -iname '*.otf' -print
-
-          FONT_COUNT=$(find fonts -type f -iname '*.otf' | wc -l)
-
-          if [ "$FONT_COUNT" -eq 0 ]; then
-            echo "::error::No OTF font file found in fonts/"
-            exit 1
-          fi
-
-          echo "Found $FONT_COUNT OTF font file(s)."
-
-      - name: Check Python syntax and UTF-8
+      - name: Check Python syntax and UTF‑8
         shell: bash
         run: |
           set -e
           python - <<'PY'
           from pathlib import Path
-
           files = sorted(Path(".").glob("*.py"))
-
-          if not files:
-              raise SystemExit("No Python files found.")
-
-          for file in files:
-              source = file.read_text(encoding="utf-8")
-              compile(source, str(file), "exec")
-              print("Python syntax and UTF-8 OK:", file)
+          if not files: raise SystemExit("No Python files")
+          for f in files:
+              src = f.read_text("utf-8")
+              compile(src, str(f), "exec")
+              print("OK", f)
           PY
 
       - name: Build BiliPink APK
