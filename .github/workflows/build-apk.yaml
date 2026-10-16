@@ -8,6 +8,8 @@ on:
 
 env:
   PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
+  P4A_USE_CERTIFI: 1
+  P4A_ALLOW_TLS_13: 1
 
 jobs:
   build-apk:
@@ -27,34 +29,44 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Cache Buildozer SDK & NDK
+      - name: 💥 Purge old buildozer cache FIRST（强制清旧缓存）
+        run: |
+          rm -rf ~/.buildozer
+          mkdir -p ~/.buildozer
+
+      - name: Cache fresh Buildozer SDK & NDK
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: buildozer-v3-${{ hashFiles('buildozer.spec') }}
-          restore-keys: buildozer-v3-
+          key: bilipink-auto-${{ github.sha }}
+          # ⚠️用 commit hash 当 key：每一次提交自动全新一套缓存，完全不会吃旧脏数据
 
       - name: Install system dependencies
         run: |
-          sudo apt update
-          sudo apt -y install automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev
+          sudo apt update -y
+          sudo apt -y install automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf
 
-      - name: Install python packages (含Cython！)
+      - name: Install python packages
         run: |
           python -m pip install --upgrade pip
-          pip install Cython==3.0.11 buildozer==1.5.0
+          pip install Cython==3.0.11 buildozer==1.5.0 certifi
 
-      - name: Show buildozer / cython version
+      - name: Print versions
         run: |
           buildozer --version
-          python -c "import Cython;print('Cython ok',Cython.__version__)"
+          python -c "import Cython,certifi; print('Cython:',Cython.__version__,'certifi:',certifi.__version__)"
 
-      - name: Debug build APK
+      - name: Check fonts folder
+        run: |
+          if [ ! -d "./fonts" ]; then echo "::warning file=buildozer.spec::fonts文件夹缺失，中文图标会方框！"; fi
+          ls -la ./fonts || true
+
+      - name: Build APK
         run: |
           buildozer android debug
 
-      - name: Upload debug APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: bilipink-debug-apk
+          name: bilipink-apk
           path: bin/*.apk
