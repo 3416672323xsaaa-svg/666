@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 120
 
     env:
-      # Buildozer and this workflow must use exactly the same SDK location.
       ANDROID_SDK_ROOT: /home/runner/.buildozer/android/platform/android-sdk
       ANDROID_HOME: /home/runner/.buildozer/android/platform/android-sdk
       P4A_USE_CERTIFI: "0"
@@ -50,22 +49,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y             build-essential git zip unzip wget curl             autoconf automake libtool pkg-config             cmake ninja-build ccache             libffi-dev libssl-dev zlib1g-dev             libncurses5-dev libncursesw5-dev libtinfo6 gettext
 
-      - name: Install Buildozer
+      - name: Install Buildozer and pinned python-for-android
         shell: bash
         run: |
           set -euxo pipefail
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install "Cython==0.29.36" "buildozer==1.5.0"
+          git clone --depth 1 --branch v2024.01.21 https://github.com/kivy/python-for-android.git "$RUNNER_TEMP/python-for-android"
+          echo "P4A_SOURCE_DIR=$RUNNER_TEMP/python-for-android" >> "$GITHUB_ENV"
 
-      - name: Bootstrap Buildozer SDK and accept licenses
+      - name: Prepare Buildozer SDK and legacy sdkmanager path
         shell: bash
         run: |
           set -euxo pipefail
-
           SDK="$ANDROID_SDK_ROOT"
           mkdir -p "$SDK/cmdline-tools"
 
-          # Install Google's command-line tools into Buildozer's own SDK path.
           TMP="$(mktemp -d)"
           cd "$TMP"
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O tools.zip
@@ -76,26 +75,32 @@ jobs:
           SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
           test -f "$SDKMANAGER"
 
-          # sdkmanager is a Java script; invoke through bash so executable-bit
-          # differences do not cause the earlier chmod permission error.
+          # Buildozer 1.5.0 looks for the legacy tools/bin/sdkmanager path.
+          # Link that expected path to the modern command-line tools.
+          mkdir -p "$SDK/tools/bin"
+          ln -sf "$SDKMANAGER" "$SDK/tools/bin/sdkmanager"
+
+          # Accept licenses and install the exact packages before Buildozer runs.
           yes | bash "$SDKMANAGER" --sdk_root="$SDK" --licenses || true
+          bash "$SDKMANAGER" --sdk_root="$SDK"             "platform-tools"             "platforms;android-33"             "build-tools;33.0.2"
 
-          bash "$SDKMANAGER" --sdk_root="$SDK"             "platform-tools"             "platforms;android-33"             "build-tools;33.0.2"             "build-tools;37.0.0"
-
-          # Check both the pinned API-33 tools and the build-tools version
-          # requested in the reported error.
+          test -x "$SDK/tools/bin/sdkmanager"
           test -x "$SDK/platform-tools/adb"
           test -d "$SDK/platforms/android-33"
           test -x "$SDK/build-tools/33.0.2/aidl"
-          test -x "$SDK/build-tools/37.0.0/aidl"
 
-      - name: Check project files
+      - name: Configure build without changing the repository Spec
         shell: bash
         run: |
           set -euxo pipefail
           test -f buildozer.spec
           test -f main.py
           python -m py_compile main.py
+
+          # Apply this only inside the temporary GitHub runner workspace.
+          # The committed buildozer.spec in your repository is not changed.
+          sed -i '/^\[app\]/a p4a.source_dir = '"$P4A_SOURCE_DIR" buildozer.spec
+          grep -F "p4a.source_dir = $P4A_SOURCE_DIR" buildozer.spec
 
       - name: Build APK
         shell: bash
