@@ -11,7 +11,13 @@ env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
   P4A_SDK: ${{ github.workspace }}/android-sdk
+  BUILDOZER_ANDROID_SDK: ${{ github.workspace }}/android-sdk
+  P4A_PYTHON_VERSION: "3.11"
   P4A_JOBS: "2"
+  PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: '0'
+  P4A_USE_CERTIFI: '0'
+  P4A_ALLOW_TLS_13: '1'
+  CYTHON_LANGUAGE_LEVEL: '3'
   _JAVA_OPTIONS: "-Xmx2048m"
   GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m"
 
@@ -25,22 +31,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Full reset + 2G swap
+      - name: Reset buildozer and SDK
         shell: bash
         run: |
-          set +e
-          rm -rf "$HOME/.buildozer" "$ANDROID_HOME" ~/.cache/pip ~/.cache/pip-ephem-wheel-cache ~/.cache/pip-tools
+          rm -rf "$HOME/.buildozer"
+          rm -rf "$ANDROID_HOME"
+          mkdir -p "$HOME/.buildozer"
+          mkdir -p "$ANDROID_HOME"
+
+      - name: Swap
+        shell: bash
+        run: |
           sudo fallocate -l 2G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile
           sudo swapon /mnt/swapfile
-          set -e
 
-      - name: Apt deps
+      - name: System deps
         shell: bash
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y automake zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf build-essential cmake zlib1g-dev gettext autopoint wget
+          sudo apt-get install -y \
+            automake libltdl-dev zip unzip openjdk-17-jdk \
+            git pkg-config libffi-dev libssl-dev autoconf \
+            build-essential cmake zlib1g-dev \
+            libncurses5-dev libncursesw5-dev libtinfo5 \
+            gettext autopoint wget
 
       - name: Python 3.11
         uses: actions/setup-python@v5
@@ -50,55 +66,56 @@ jobs:
       - name: Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
           java-version: '17'
+          distribution: 'temurin'
 
-      - name: Pip install with PyPI mirror and longer timeout
+      - name: Install build tools
         shell: bash
         run: |
-          python -m pip config set global.index-url https://pypi.org/simple/
-          python -m pip config set global.trusted-host pypi.org
-          python -m pip install --default-timeout=120 --retries 5 --upgrade pip
-          python -m pip install --default-timeout=120 --retries 5 Cython==3.0.11 buildozer==1.5.0
-          python -m pip install --default-timeout=120 --retries 5 python-for-android
+          python -m pip install --upgrade pip
+          python -m pip install Cython==3.0.11 buildozer==1.5.0 python-for-android
 
-      - name: SDK folder + licenses
+      - name: Android SDK licenses
         shell: bash
         run: |
-          mkdir -p "$ANDROID_HOME/licenses" "$ANDROID_HOME/cmdline-tools"
-          BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
-          mkdir -p "$BUI_SDK/licenses"
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          cp -r "$ANDROID_HOME/licenses" "$BUI_SDK/"
+          mkdir -p "$ANDROID_HOME/licenses"
+          printf '24333f8a63b6825ea9c5514f83c2829b004d1fee\n' > "$ANDROID_HOME/licenses/android-sdk-license"
+          printf '84831b9409646a918e30573bab4c9c91346d8abd\n' > "$ANDROID_HOME/licenses/android-sdk-preview-license"
 
-      - name: Get cmdline tools
+      - name: Download cmdline tools
         shell: bash
         run: |
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
           cd "$ANDROID_HOME/cmdline-tools"
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
           unzip -q cmdline-tools.zip
           mv cmdline-tools latest
           rm -f cmdline-tools.zip
+          mkdir -p "$ANDROID_HOME/tools/bin"
+          ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
 
-      - name: SDK + NDK install
+      - name: Install SDK
         shell: bash
         run: |
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653"
-          BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
-          mkdir -p "$BUI_SDK"
-          cp -r "$ANDROID_HOME"/. "$BUI_SDK/"
+          yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses >/dev/null || true
+          sdkmanager --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2" \
+            "ndk;25.2.9519653"
 
-      - name: Sanity check
+      - name: Copy SDK to buildozer
         shell: bash
         run: |
-          buildozer --version
-          p4a --version
-          java -version
+          BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
+          mkdir -p "$BUI_SDK"
+          cp -r "$ANDROID_HOME"/* "$BUI_SDK/"
+          mkdir -p "$BUI_SDK/tools/bin"
+          ln -sf "$BUI_SDK/cmdline-tools/latest/bin/sdkmanager" "$BUI_SDK/tools/bin/sdkmanager"
 
-      - name: Build APK
+      - name: Build
         shell: bash
         run: |
           buildozer android debug
