@@ -1,6 +1,9 @@
 name: Android Build BiliPink
+
 on:
   push:
+    branches: [ main ]
+  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
@@ -10,12 +13,14 @@ env:
   P4A_SDK: ${{ github.workspace }}/android-sdk
   P4A_JOBS: "2"
   _JAVA_OPTIONS: "-Xmx2048m"
-  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2048m"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2048m"
 
 jobs:
   build-apk:
+    name: Build BiliPink APK
     runs-on: ubuntu-22.04
     timeout-minutes: 210
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,7 +29,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          rm -rf "$HOME/.buildozer" "$ANDROID_HOME" ~/.cache/*
+          rm -rf "$HOME/.buildozer" "$ANDROID_HOME" ~/.cache/pip ~/.cache/pip-ephem-wheel-cache ~/.cache/pip-tools
           sudo fallocate -l 2G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
           sudo mkswap /mnt/swapfile
@@ -37,24 +42,25 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y automake zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf build-essential cmake zlib1g-dev gettext autopoint wget
 
-      - name: Python3.11
+      - name: Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Java17
+      - name: Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # ✅正确顺序：必须 buildozer 在前，python‑for‑android在后（官方文档顺序！之前装反过）
-      - name: Pip install (CORRECT ORDER)
+      - name: Pip install with PyPI mirror and longer timeout
         shell: bash
         run: |
-          python -m pip install --upgrade pip==26.1
-          python -m pip install Cython==3.0.11 buildozer==1.5.0
-          python -m pip install python-for-android
+          python -m pip config set global.index-url https://pypi.org/simple/
+          python -m pip config set global.trusted-host pypi.org
+          python -m pip install --default-timeout=120 --retries 5 --upgrade pip
+          python -m pip install --default-timeout=120 --retries 5 Cython==3.0.11 buildozer==1.5.0
+          python -m pip install --default-timeout=120 --retries 5 python-for-android
 
       - name: SDK folder + licenses
         shell: bash
@@ -69,12 +75,12 @@ jobs:
       - name: Get cmdline tools
         shell: bash
         run: |
-          cd $ANDROID_HOME/cmdline-tools
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q commandlinetools-linux-11076708_latest.zip
+          cd "$ANDROID_HOME/cmdline-tools"
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip
           mv cmdline-tools latest
-          rm *.zip
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          rm -f cmdline-tools.zip
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
 
       - name: SDK + NDK install
         shell: bash
@@ -82,11 +88,10 @@ jobs:
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           sdkmanager --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653"
           BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
-          mkdir -p $BUI_SDK
-          cp -r $ANDROID_HOME/. $BUI_SDK/
+          mkdir -p "$BUI_SDK"
+          cp -r "$ANDROID_HOME"/. "$BUI_SDK/"
 
-      # ⚠️【彻底删掉那个 import p4a 错误检查！！】只简单验证命令可用
-      - name: Quick sanity check
+      - name: Sanity check
         shell: bash
         run: |
           buildozer --version
@@ -95,7 +100,8 @@ jobs:
 
       - name: Build APK
         shell: bash
-        run: buildozer android debug
+        run: |
+          buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -103,3 +109,13 @@ jobs:
           name: bilipink-apk
           path: bin/*.apk
           retention-days: 14
+
+      - name: Upload logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilipink-logs
+          path: |
+            ~/.buildozer/build.log
+            ~/.buildozer/android/platform/build-*/build.log
+          if-no-files-found: ignore
