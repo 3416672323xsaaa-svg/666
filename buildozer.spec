@@ -18,6 +18,10 @@ android.ndk = 25b
 android.build_tools = 33.0.2
 android.archs = arm64-v8a
 
+# 关键两行：锁死主机与打包内Python都是3.11
+python3 = 3.11
+hostpython3 = 3.11
+
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE,READ_MEDIA_VIDEO,READ_MEDIA_IMAGES
 android.meta_data = android.permission.MANAGE_EXTERNAL_STORAGE;android:name=android.permission.MANAGE_EXTERNAL_STORAGE
 
