@@ -2,79 +2,35 @@ name: BiliPink_BUILD
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
 
-permissions:
-  contents: read
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
+    container:
+      image: ghcr.io/kivy/buildozer:latest
+
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git \
-            zip \
-            unzip \
-            openjdk-17-jdk \
-            autoconf \
-            automake \
-            libtool \
-            pkg-config \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            cmake \
-            libffi-dev \
-            libssl-dev
-
-      - name: Download BDL Android ARM64
-        run: |
-          mkdir -p assets
-          curl -L \
-            https://github.com/Yuelioi/bdl/releases/latest/download/bdl-android-aarch64 \
-            -o assets/bdl-android-aarch64
-          chmod +x assets/bdl-android-aarch64
-          ls -lh assets/bdl-android-aarch64
-          file assets/bdl-android-aarch64
-
-      - name: Install Buildozer
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install \
-            buildozer==1.5.0 \
-            "Cython==0.29.33"
-
-      - name: Check environment
-        run: |
-          python --version
-          cython --version
-          buildozer --version
 
       - name: Fix Git safe directory
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory '*'
 
       - name: Build BiliPink APK
+        env:
+          BUILDOZER_WARN_ON_ROOT: "0"
         run: |
-          buildozer android debug --log-level 2
+          buildozer android debug --log-level 1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: BiliPink_FINAL
+          name: BiliPink_APK
           path: bin/*.apk
           if-no-files-found: error
-          compression-level: 0
