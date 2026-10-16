@@ -1317,18 +1317,587 @@ class BiliPinkApp(App):
             ),
             None
         )
-
-    def _parsed(
-        self,
-        taskid,
-        info,
-        options,
-        cover_path
-    ):
-
+def _parsed(self, taskid, info, options, cover_path):
         self.busy = False
-
         self.current_info = info
         self.current_options = options
 
-        t = self._find_tas
+        task = self._find_task(taskid)
+        if task is None:
+            return
+
+        task.update({
+            "title": info.get("title", "BiliPink Video"),
+            "cover_path": cover_path,
+            "bvid": info.get("bvid", ""),
+            "aid": info.get("aid", ""),
+            "status": "等待下载",
+            "percent": 0,
+            "info": info,
+        })
+
+        self.show_home()
+        self._quality_popup(taskid, info, options)
+
+    def _parse_error(self, taskid, message):
+        self.busy = False
+        task = self._find_task(taskid)
+
+        if task:
+            task.update({
+                "status": "已失败",
+                "error": str(message),
+                "percent": 0,
+            })
+
+        self.show_home()
+        self._popup("解析失败", str(message))
+
+    def _quality_popup(self, taskid, info, options):
+        box = BoxLayout(
+            orientation="vertical",
+            spacing=dp(8),
+            padding=dp(14),
+        )
+
+        title = self._label(
+            info.get("title", "视频信息"),
+            16, PINK, True, height=dp(48)
+        )
+        box.add_widget(title)
+
+        stats = (
+            f"UP主：{info.get('owner', '未知')}\n"
+            f"时长：{fmt_time(info.get('duration', 0))}\n"
+            f"播放：{fmt_num(info.get('view', 0))}  "
+            f"弹幕：{fmt_num(info.get('danmaku', 0))}\n"
+            f"点赞：{fmt_num(info.get('like', 0))}  "
+            f"收藏：{fmt_num(info.get('favorite', 0))}"
+        )
+        box.add_widget(self._label(
+            stats, 12, MUTED, height=dp(82)
+        ))
+        box.add_widget(self._label(
+            "选择实际获取到的画质",
+            13, TEXT, True, height=dp(30)
+        ))
+
+        scroll = ScrollView(do_scroll_x=False)
+        options_box = BoxLayout(
+            orientation="vertical",
+            spacing=dp(8),
+            size_hint_y=None,
+            padding=[0, dp(2), 0, dp(4)],
+        )
+        options_box.bind(
+            minimum_height=options_box.setter("height")
+        )
+
+        popup = Popup(
+            title="选择下载画质",
+            content=box,
+            size_hint=(0.92, 0.82),
+            auto_dismiss=True,
+        )
+
+        if not options:
+            options_box.add_widget(self._label(
+                "没有获取到可下载的画质，请重新解析。",
+                13, RED, height=dp(52)
+            ))
+
+        for option in options:
+            label = option.get("label", "未知画质")
+            size = human_size(option.get("size", 0))
+            stream_type = option.get("type", "mp4").upper()
+
+            btn = self._btn(
+                f"{label}  ·  {stream_type}  ·  {size}",
+                lambda opt=option: self._start_task_download(
+                    taskid, opt, popup
+                ),
+                PINK_LIGHT,
+                PINK,
+                dp(46),
+                True,
+            )
+            options_box.add_widget(btn)
+
+        scroll.add_widget(options_box)
+        box.add_widget(scroll)
+
+        box.add_widget(self._btn(
+            "取消",
+            popup.dismiss,
+            WHITE,
+            MUTED,
+            dp(40),
+        ))
+
+        popup.open()
+
+    def _start_task_download(self, taskid, option, popup=None):
+        task = self._find_task(taskid)
+        if not task:
+            return
+
+        if self.busy:
+            self._popup("请稍候", "当前已有任务正在处理。")
+            return
+
+        self.busy = True
+
+        task.update({
+            "status": "下载中",
+            "percent": 0,
+            "error": "",
+            "option_label": option.get("label", "视频"),
+        })
+
+        if popup:
+            popup.dismiss()
+
+        self.show_home()
+
+        threading.Thread(
+            target=self._download_worker,
+            args=(taskid, dict(option)),
+            daemon=True,
+        ).start()
+
+    def _download_worker(self, taskid, option):
+        from downloader import download_stream
+
+        task = self._find_task(taskid)
+        if not task:
+            Clock.schedule_once(
+                lambda dt: self._download_finished_error(
+                    taskid, "找不到下载任务。"
+                ), 0
+            )
+            return
+
+        try:
+            download_dir = os.path.join(
+                self.user_data_dir, "downloads"
+            )
+            os.makedirs(download_dir, exist_ok=True)
+
+            name = safe_filename(task.get("title", "BiliPink Video"))
+            bvid = task.get("bvid", "") or taskid.replace(".", "_")
+            stem = f"{name}_{bvid}"
+
+            last_refresh = [0.0]
+
+            def progress(done, total):
+                if total > 0:
+                    percent = min(99.0, done * 100.0 / total)
+                else:
+                    percent = 0.0
+
+                now = time.time()
+                if now - last_refresh[0] >= 0.35:
+                    last_refresh[0] = now
+                    Clock.schedule_once(
+                        lambda dt, p=percent:
+                        self._download_progress(taskid, p),
+                        0
+                    )
+
+            if option.get("type") == "dash":
+                from downloader import download_dash, merge_mp4
+
+                video_path = os.path.join(
+                    download_dir, stem + "_video.m4s"
+                )
+                audio_path = os.path.join(
+                    download_dir, stem + "_audio.m4s"
+                )
+                output_path = os.path.join(
+                    download_dir, stem + ".mp4"
+                )
+
+                Clock.schedule_once(
+                    lambda dt: self._set_task_status(
+                        taskid, "下载中"
+                    ), 0
+                )
+
+                download_dash(
+                    option["video_url"],
+                    option["audio_url"],
+                    video_path,
+                    audio_path,
+                    progress=progress,
+                )
+
+                Clock.schedule_once(
+                    lambda dt: self._set_task_status(
+                        taskid, "合并中"
+                    ), 0
+                )
+
+                # 合并失败时保留独立音视频文件，不将它们冒充完整 MP4。
+                try:
+                    merge_mp4(video_path, audio_path, output_path)
+                except Exception as merge_error:
+                    raise RuntimeError(
+                        "视频和音频已分别下载，但合并失败。\n"
+                        f"原因：{merge_error}\n\n"
+                        f"视频文件：{video_path}\n"
+                        f"音频文件：{audio_path}\n\n"
+                        "请在 APK 中加入可执行的 Android arm64 FFmpeg，"
+                        "再进行合并。"
+                    )
+
+                for path in (video_path, audio_path):
+                    try:
+                        if os.path.isfile(path):
+                            os.remove(path)
+                    except Exception:
+                        pass
+
+            else:
+                output_path = os.path.join(
+                    download_dir, stem + ".mp4"
+                )
+
+                download_stream(
+                    option["url"],
+                    output_path,
+                    progress=progress,
+                )
+
+            if not os.path.isfile(output_path):
+                raise RuntimeError("下载流程结束，但没有找到输出文件。")
+
+            if os.path.getsize(output_path) <= 1024:
+                raise RuntimeError("输出文件过小，可能不是有效的视频文件。")
+
+            record = {
+                "id": taskid,
+                "title": task.get("title", name),
+                "bvid": task.get("bvid", ""),
+                "cover_path": task.get("cover_path", ""),
+                "path": output_path,
+                "created": task.get("created", ""),
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "size": os.path.getsize(output_path),
+                "status": "已完成",
+                "option_label": option.get("label", ""),
+            }
+
+            Clock.schedule_once(
+                lambda dt, rec=record:
+                self._download_finished_ok(taskid, rec),
+                0
+            )
+
+        except Exception as e:
+            Clock.schedule_once(
+                lambda dt, msg=str(e):
+                self._download_finished_error(taskid, msg),
+                0
+            )
+
+    def _download_progress(self, taskid, percent):
+        task = self._find_task(taskid)
+        if not task:
+            return
+
+        task["percent"] = percent
+
+        # 降低 UI 刷新频率，避免下载时反复重建整个列表。
+        if self.page_name == "home":
+            self.show_home()
+
+    def _set_task_status(self, taskid, status):
+        task = self._find_task(taskid)
+        if task:
+            task["status"] = status
+            self.show_home()
+
+    def _download_finished_ok(self, taskid, record):
+        self.busy = False
+
+        task = self._find_task(taskid)
+        if task:
+            task.update(record)
+            task["percent"] = 100
+            task["status"] = "已完成"
+
+        self.history = [
+            item for item in self.history
+            if item.get("id") != taskid
+        ]
+        self.history.insert(0, record)
+        self._save_history()
+
+        self.show_home()
+        self._popup(
+            "下载完成",
+            f"{record['title']}\n\n"
+            f"保存位置：\n{record['path']}\n\n"
+            f"文件大小：{human_size(record.get('size', 0))}"
+        )
+
+    def _download_finished_error(self, taskid, message):
+        self.busy = False
+
+        task = self._find_task(taskid)
+        if task:
+            task.update({
+                "status": "已失败",
+                "error": str(message),
+            })
+
+        self.show_home()
+        self._popup("下载失败", str(message))
+
+    # ---------------------------------------------------------
+    # 我的 / 已下载 / 导出
+    # ---------------------------------------------------------
+
+    def show_mine(self):
+        self.page_name = "mine"
+        self._scroll()
+        self._nav()
+
+        self.content.add_widget(self._label(
+            "我的 BiliPink",
+            23, PINK, True, height=dp(48)
+        ))
+        self.content.add_widget(self._label(
+            f"已完成 {len(self.history)} 个下载任务",
+            13, MUTED, height=dp(30)
+        ))
+
+        self.content.add_widget(self._btn(
+            "刷新列表",
+            self.show_mine,
+            PINK_LIGHT,
+            PINK,
+        ))
+
+        self.content.add_widget(self._label(
+            "已下载文件",
+            16, TEXT, True, height=dp(38)
+        ))
+
+        if not self.history:
+            self.content.add_widget(self._label(
+                "这里还没有下载完成的视频。",
+                13, MUTED, height=dp(70)
+            ))
+
+        for rec in self.history:
+            card = Surface(
+                orientation="vertical",
+                size_hint_y=None,
+                height=dp(145),
+                padding=dp(12),
+                spacing=dp(5),
+            )
+
+            card.add_widget(self._label(
+                rec.get("title", "未命名视频"),
+                14, PINK, True, height=dp(34)
+            ))
+            card.add_widget(self._label(
+                f"{rec.get('option_label', '')}  ·  "
+                f"{human_size(rec.get('size', 0))}",
+                12, MUTED, height=dp(24)
+            ))
+
+            path = rec.get("path", "")
+            exists = os.path.isfile(path)
+            card.add_widget(self._label(
+                "文件存在" if exists else "文件已不存在",
+                12, GREEN if exists else RED,
+                height=dp(22)
+            ))
+
+            actions = BoxLayout(
+                size_hint_y=None,
+                height=dp(36),
+                spacing=dp(8),
+            )
+            actions.add_widget(self._btn(
+                "导出到下载目录",
+                lambda r=rec: self._export_record(r),
+                PINK, WHITE, dp(36), True
+            ))
+            actions.add_widget(self._btn(
+                "删除记录",
+                lambda r=rec: self._delete_record(r),
+                PINK_LIGHT, PINK, dp(36)
+            ))
+            card.add_widget(actions)
+            self.content.add_widget(card)
+
+        self.content.add_widget(self._btn(
+            "清空下载记录",
+            self._clear_history_confirm,
+            WHITE, RED,
+        ))
+
+    def _export_record(self, record):
+        src = record.get("path", "")
+
+        if not src or not os.path.isfile(src):
+            self._popup("导出失败", "原文件不存在，可能已被删除。")
+            return
+
+        try:
+            # Android 11+ 可能限制直接写入公共目录；
+            # 若系统拒绝访问，会显示错误而不会谎报成功。
+            if platform == "android":
+                dest_dir = "/storage/emulated/0/Download/BiliPink"
+            else:
+                dest_dir = os.path.join(
+                    os.path.expanduser("~"), "Downloads", "BiliPink"
+                )
+
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, os.path.basename(src))
+            shutil.copy2(src, dest)
+
+            self._popup(
+                "导出完成",
+                f"已复制到：\n{dest}"
+            )
+
+        except Exception as e:
+            self._popup(
+                "导出失败",
+                "系统可能限制了 APK 写入公共下载目录。\n\n"
+                f"详细原因：{e}\n\n"
+                "原文件仍保存在应用内部下载目录中。"
+            )
+
+    def _delete_record(self, record):
+        self.history = [
+            x for x in self.history
+            if x.get("id") != record.get("id")
+        ]
+        self._save_history()
+        self.show_mine()
+
+    def _clear_history_confirm(self):
+        box = BoxLayout(
+            orientation="vertical",
+            spacing=dp(12),
+            padding=dp(14),
+        )
+        box.add_widget(self._label(
+            "只清除下载记录，不会删除已经下载的视频文件。",
+            14, TEXT, height=dp(64)
+        ))
+
+        popup = Popup(
+            title="清除记录",
+            content=box,
+            size_hint=(0.86, 0.34),
+        )
+
+        row = BoxLayout(
+            size_hint_y=None,
+            height=dp(42),
+            spacing=dp(10),
+        )
+        row.add_widget(self._btn(
+            "取消", popup.dismiss, WHITE, MUTED
+        ))
+
+        def clear():
+            self.history = []
+            self._save_history()
+            popup.dismiss()
+            self.show_mine()
+
+        row.add_widget(self._btn(
+            "确认清除", clear, PINK, WHITE, bold=True
+        ))
+        box.add_widget(row)
+        popup.open()
+
+    # ---------------------------------------------------------
+    # 本地历史记录
+    # ---------------------------------------------------------
+
+    def _history_path(self):
+        return os.path.join(self.user_data_dir, "history.json")
+
+    def _save_history(self):
+        try:
+            os.makedirs(self.user_data_dir, exist_ok=True)
+
+            with open(
+                self._history_path(),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump(
+                    self.history,
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        except Exception:
+            pass
+
+    def _load_history(self):
+        try:
+            with open(
+                self._history_path(),
+                "r",
+                encoding="utf-8",
+            ) as f:
+                data = json.load(f)
+
+            if isinstance(data, list):
+                self.history = [
+                    x for x in data
+                    if isinstance(x, dict)
+                ]
+        except (OSError, ValueError, TypeError):
+            self.history = []
+
+    # ---------------------------------------------------------
+    # 弹窗
+    # ---------------------------------------------------------
+
+    def _popup(self, title, message):
+        box = BoxLayout(
+            orientation="vertical",
+            spacing=dp(10),
+            padding=dp(14),
+        )
+
+        msg = self._label(
+            message,
+            13, TEXT, height=dp(150)
+        )
+        msg.text_size = (Window.width * 0.76, None)
+        box.add_widget(msg)
+
+        popup = Popup(
+            title=str(title),
+            content=box,
+            size_hint=(0.88, 0.48),
+            auto_dismiss=True,
+        )
+        box.add_widget(self._btn(
+            "知道了", popup.dismiss, PINK, WHITE, bold=True
+        ))
+        popup.open()
+
+
+    def on_start(self):
+        self._load_history()
+        self.show_home()
+
+
+if __name__ == "__main__":
+    BiliPinkApp().run()
+ 
