@@ -8,7 +8,7 @@ on:
 
 env:
   PYTHONFORANDROID_PREREQUISITES_INSTALL_INTERACTIVE: 0
-  P4A_USE_CERTIFI: 1
+  P4A_USE_CERTIFI: 0       # ✅关掉certifi注入！之前是1就会乱加参数
   P4A_ALLOW_TLS_13: 1
 
 jobs:
@@ -38,23 +38,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.buildozer
-          key: bilipink-auto-${{ github.sha }}
-          # ⚠️用 commit hash 当 key：每一次提交自动全新一套缓存，完全不会吃旧脏数据
+          key: bilipink-fixed-${{ github.sha }}
 
       - name: Install system dependencies
         run: |
           sudo apt update -y
           sudo apt -y install automake libltdl-dev zip unzip openjdk-17-jdk git pkg-config libffi-dev libssl-dev autoconf
 
-      - name: Install python packages
+      - name: Install fixed python packages
         run: |
           python -m pip install --upgrade pip
-          pip install Cython==3.0.11 buildozer==1.5.0 certifi
+          pip install Cython==3.0.11 buildozer==1.5.0 python-for-android==2024.12.11 certifi
 
       - name: Print versions
         run: |
           buildozer --version
           python -c "import Cython,certifi; print('Cython:',Cython.__version__,'certifi:',certifi.__version__)"
+          python -c "import pythonforandroid; print('P4A:',pythonforandroid.__version__)"
 
       - name: Check fonts folder
         run: |
@@ -70,3 +70,11 @@ jobs:
         with:
           name: bilipink-apk
           path: bin/*.apk
+
+      # ✅失败也捞日志（以后炸了直接看）
+      - name: Upload buildozer log (always run)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-full-log
+          path: ~/.buildozer/build.log
