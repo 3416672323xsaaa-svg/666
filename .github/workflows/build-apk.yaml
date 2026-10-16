@@ -15,6 +15,9 @@ env:
   P4A_ALLOW_TLS_13: '1'
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+  # 新增：强制p4a读取同一个SDK路径
+  P4A_SDK: ${{ github.workspace }}/android-sdk
+  BUILDOZER_ANDROID_SDK: ${{ github.workspace }}/android-sdk
   CYTHON_LANGUAGE_LEVEL: '3'
 
 jobs:
@@ -74,10 +77,28 @@ jobs:
           mkdir -p "$ANDROID_HOME/licenses"
           mkdir -p "$ANDROID_HOME/cmdline-tools"
 
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          echo "d975f751698a77b662f1254ddbeed3901f976be5" > "$ANDROID_HOME/licenses/android-sdk-license-5be876d5"
-          echo "813888b925a5d7c2f0bd221c1bb83411f5072c1e" > "$ANDROID_HOME/licenses/android-sdk-license-d9534051"
+          # Buildozer / p4a 偷偷自己用的私有SDK目录（之前缺失）
+          BUI_SDK="$HOME/.buildozer/android/platform/android-sdk"
+          rm -rf "$BUI_SDK"
+          mkdir -p "$BUI_SDK/licenses"
+          mkdir -p "$BUI_SDK/cmdline-tools"
+
+          L1="24333f8a63b6825ea9c5514f83c2829b004d1fee"
+          L2="84831b9409646a918e30573bab4c9c91346d8abd"
+          L3="d975f751698a77b662f1254ddbeed3901f976be5"
+          L4="813888b925a5d7c2f0bd221c1bb83411f5072c1e"
+
+          # 主SDK写入许可
+          echo "$L1" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "$L2" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo "$L3" > "$ANDROID_HOME/licenses/android-sdk-license-5be876d5"
+          echo "$L4" > "$ANDROID_HOME/licenses/android-sdk-license-d9534051"
+
+          # Buildozer私有SDK同步写入完全一样许可
+          echo "$L1" > "$BUI_SDK/licenses/android-sdk-license"
+          echo "$L2" > "$BUI_SDK/licenses/android-sdk-preview-license"
+          echo "$L3" > "$BUI_SDK/licenses/android-sdk-license-5be876d5"
+          echo "$L4" > "$BUI_SDK/licenses/android-sdk-license-d9534051"
 
       - name: Download SDK cmdline tools
         shell: bash
@@ -95,7 +116,6 @@ jobs:
         run: |
           set -e
           export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-          # 不使用yes！哈希已经全部写好；--no_https关掉不必要校验；严格指定三件套
           sdkmanager --sdk_root="$ANDROID_HOME" --verbose \
             "platform-tools" \
             "platforms;android-33" \
@@ -103,17 +123,25 @@ jobs:
 
           rm -rf "$ANDROID_HOME/build-tools/37.0.0"
           rm -rf "$ANDROID_HOME/platforms/android-13"
-          ls -la "$ANDROID_HOME/build-tools/"
 
-      - name: Cache SDK + Buildozer (KEY v14 — MUST CLEAR OLD CACHE!)
+          # ✅关键一步：把整套装好的SDK完整复制到buildozer私有目录，阻止它自行下载
+          cp -r "$ANDROID_HOME"/* "$HOME/.buildozer/android/platform/android-sdk/"
+
+          # 二次清扫私有路径里意外出现的37版本
+          rm -rf "$HOME/.buildozer/android/platform/android-sdk/build-tools/37.0.0"
+
+          ls -la "$ANDROID_HOME/build-tools/"
+          ls -la "$HOME/.buildozer/android/platform/android-sdk/build-tools/"
+
+      - name: Cache SDK + Buildozer (KEY v18 — MUST CLEAR OLD CACHE!)
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v14-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v18-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v14-${{ runner.os }}-
+            bilipink-sdk-v18-${{ runner.os }}-
 
       - name: Install Python packages & p4a develop
         shell: bash
@@ -133,7 +161,10 @@ jobs:
           buildozer --version
           java -version
           sdkmanager --version
+          echo "=== Main SDK build-tools ==="
           ls "$ANDROID_HOME/build-tools/"
+          echo "=== Buildozer internal SDK build-tools ==="
+          ls "$HOME/.buildozer/android/platform/android-sdk/build-tools/"
 
       - name: Check project files and fonts folder
         shell: bash
