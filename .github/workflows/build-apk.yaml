@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build, Diagnose and Upload BiliPink
     runs-on: ubuntu-22.04
     timeout-minutes: 120
 
@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install system dependencies
+      - name: Install Android build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -46,21 +46,231 @@ jobs:
             cmake ccache libffi-dev libssl-dev \
             libltdl-dev gettext patch wget
 
-      - name: Install Buildozer
+      - name: Install Python build tools
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install "Cython==0.29.34" "buildozer==1.5.0"
 
-      - name: Check project files
+      - name: Check required files
         run: |
           set -eu
           test -f buildozer.spec
           test -f main.py
           test -f bili_api.py
           test -f downloader.py
-          echo "All required project files found."
+          echo "All required project files exist."
 
-      - name: Build APK and capture log
+      - name: Install automatic startup diagnostics
+        run: |
+          cat > startup_diagnostics.py <<'PY'
+          import os
+          import sys
+          import logging
+          import traceback
+          import threading
+
+          LOG_PATH = None
+
+          candidates = [
+              os.environ.get("ANDROID_PRIVATE", ""),
+              os.path.expanduser("~"),
+              os.environ.get("TMPDIR", "/tmp"),
+          ]
+
+          for directory in candidates:
+              if not directory:
+                  continue
+              try:
+                  os.makedirs(directory, exist_ok=True)
+                  path = os.path.join(
+                      directory, "bilipink-startup-diagnostic.txt"
+                  )
+                  with open(path, "a", encoding="utf-8") as f:
+                      f.write("\n--- BiliPink diagnostic session ---\n")
+                  LOG_PATH = path
+                  break
+              except Exception:
+                  continue
+
+          if LOG_PATH is None:
+              LOG_PATH = "bilipink-startup-diagnostic.txt"
+
+          def _write(message):
+              try:
+                  with open(LOG_PATH, "a", encoding="utf-8") as f:
+                      f.write(str(message) + "\n")
+                      f.flush()
+              except Exception:
+                  pass
+              try:
+                  print(str(message), file=sys.stderr, flush=True)
+              except Exception:
+                  pass
+
+          def _show_error(message):
+              try:
+                  from kivy.clock import Clock
+                  from kivy.app import App
+                  from kivy.metrics import dp
+                  from kivy.uix.boxlayout import BoxLayout
+                  from kivy.uix.label import Label
+                  from kivy.uix.scrollview import ScrollView
+                  from kivy.uix.popup import Popup
+
+                  def display(_dt):
+                      try:
+                          app = App.get_running_app()
+                          if app is None:
+                              return
+
+                          content = BoxLayout(
+                              orientation="vertical",
+                              padding=dp(10),
+                              spacing=dp(8)
+                          )
+                          content.add_widget(Label(
+                              text="BiliPink 启动出现异常",
+                              size_hint_y=None,
+                              height=dp(36)
+                          ))
+
+                          scroll = ScrollView()
+                          label = Label(
+                              text=str(message)[-5000:],
+                              size_hint_y=None,
+                              halign="left",
+                              valign="top"
+                          )
+                          label.bind(
+                              width=lambda obj, width:
+                                  setattr(obj, "text_size", (width, None)),
+                              texture_size=lambda obj, size:
+                                  setattr(obj, "height", size[1] + dp(12))
+                          )
+                          scroll.add_widget(label)
+                          content.add_widget(scroll)
+
+                          popup = Popup(
+                              title="启动诊断",
+                              content=content,
+                              size_hint=(0.94, 0.82)
+                          )
+                          popup.open()
+                      except Exception as exc:
+                          _write("Diagnostic popup failed: " + repr(exc))
+
+                  Clock.schedule_once(display, 0.2)
+              except Exception as exc:
+                  _write("Cannot display diagnostic popup: " + repr(exc))
+
+          def _exception_hook(exc_type, exc_value, exc_tb):
+              detail = "".join(
+                  traceback.format_exception(exc_type, exc_value, exc_tb)
+              )
+              _write("UNHANDLED PYTHON EXCEPTION:\n" + detail)
+              _show_error(detail)
+
+          sys.excepthook = _exception_hook
+
+          if hasattr(threading, "excepthook"):
+              def _thread_exception(args):
+                  _exception_hook(
+                      args.exc_type, args.exc_value, args.exc_traceback
+                  )
+              threading.excepthook = _thread_exception
+
+          class _KivyErrorHandler(logging.Handler):
+              def emit(self, record):
+                  try:
+                      message = self.format(record)
+                      _write("KIVY LOG: " + message)
+                      if record.levelno >= logging.ERROR:
+                          _show_error(message)
+                  except Exception:
+                      pass
+
+          def install_kivy_logging():
+              try:
+                  from kivy.logger import Logger
+                  file_handler = logging.FileHandler(
+                      LOG_PATH, encoding="utf-8"
+                  )
+                  file_handler.setLevel(logging.DEBUG)
+                  file_handler.setFormatter(logging.Formatter(
+                      "%(asctime)s %(levelname)s %(message)s"
+                  ))
+                  Logger.addHandler(file_handler)
+
+                  popup_handler = _KivyErrorHandler()
+                  popup_handler.setLevel(logging.ERROR)
+                  Logger.addHandler(popup_handler)
+
+                  _write("Kivy diagnostic logging enabled.")
+              except Exception:
+                  _write(
+                      "Kivy logging setup failed:\n"
+                      + traceback.format_exc()
+                  )
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("main.py")
+          source = path.read_text(encoding="utf-8")
+          lines = source.splitlines(keepends=True)
+
+          if "import startup_diagnostics" not in source:
+              index = 0
+
+              if lines and "coding" in lines[0] and lines[0].startswith("#"):
+                  index = 1
+
+              while index < len(lines) and not lines[index].strip():
+                  index += 1
+
+              if index < len(lines) and (
+                  lines[index].lstrip().startswith('"""')
+                  or lines[index].lstrip().startswith("'''")
+              ):
+                  quote = lines[index].lstrip()[:3]
+                  if lines[index].count(quote) >= 2:
+                      index += 1
+                  else:
+                      index += 1
+                      while index < len(lines):
+                          if quote in lines[index]:
+                              index += 1
+                              break
+                          index += 1
+
+              lines.insert(index, "\nimport startup_diagnostics\n")
+              source = "".join(lines)
+
+          if "startup_diagnostics.install_kivy_logging()" not in source:
+              marker = "from bili_api import"
+              if marker not in source:
+                  raise SystemExit(
+                      "Cannot locate bili_api import in main.py"
+                  )
+              source = source.replace(
+                  marker,
+                  "startup_diagnostics.install_kivy_logging()\n\n"
+                  + marker,
+                  1
+              )
+
+          path.write_text(source, encoding="utf-8")
+          print("Startup diagnostic hook installed.")
+          PY
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile \
+            main.py bili_api.py downloader.py startup_diagnostics.py
+          echo "Python syntax validation passed."
+
+      - name: Build APK
         id: build
         continue-on-error: true
         run: |
@@ -71,19 +281,39 @@ jobs:
           echo "build_exit_code=$result" >> "$GITHUB_OUTPUT"
           exit "$result"
 
-      - name: Print error details directly in Actions
-        if: steps.build.outcome == 'failure'
+      - name: Detect generated APK
+        id: apk
+        if: always()
+        run: |
+          mkdir -p bin
+          if compgen -G "bin/*.apk" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Generated APK files:"
+            ls -lh bin/*.apk
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No APK file was found."
+          fi
+
+      - name: Print automatic diagnostic report
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          APK_EXISTS: ${{ steps.apk.outputs.exists }}
         run: |
           python - <<'PY'
+          import os
           import re
+          import glob
+          import zipfile
           from pathlib import Path
 
-          p = Path("build.log")
-          raw = p.read_text(errors="replace") if p.exists() else ""
+          log_path = Path("build.log")
+          raw = log_path.read_text(errors="replace") if log_path.exists() else ""
           raw = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', raw)
           lines = raw.splitlines()
 
-          keys = (
+          keywords = (
               "error:", "fatal error", "traceback",
               "command failed", "exception:",
               "out of memory", "no space left",
@@ -94,71 +324,104 @@ jobs:
 
           hits = [
               i for i, line in enumerate(lines)
-              if any(k in line.lower() for k in keys)
+              if any(key in line.lower() for key in keywords)
           ]
 
-          print("========== BILIPINK BUILD ERROR REPORT ==========")
-          print("Total log lines:", len(lines))
-          print("Matching error lines:", len(hits))
+          report = [
+              "BiliPink automatic build report",
+              "Build outcome: " + os.environ.get("BUILD_OUTCOME", "unknown"),
+              "APK exists: " + os.environ.get("APK_EXISTS", "unknown"),
+              "Build log lines: " + str(len(lines)),
+              "Matching error lines: " + str(len(hits)),
+              ""
+          ]
+
+          for apk in glob.glob("bin/*.apk"):
+              report.append("APK: " + apk)
+              try:
+                  report.append("APK size: " + str(os.path.getsize(apk)))
+                  with zipfile.ZipFile(apk) as archive:
+                      names = archive.namelist()
+                      report.append("APK ZIP integrity: OK")
+                      report.append(
+                          "Contains AndroidManifest.xml: "
+                          + str("AndroidManifest.xml" in names)
+                      )
+                      report.append(
+                          "Native libraries: "
+                          + str(sum(n.endswith(".so") for n in names))
+                      )
+              except Exception as exc:
+                  report.append("APK inspection error: " + repr(exc))
+
+          report.append("")
+          report.append("=== Error context ===")
 
           if hits:
-              chosen = set()
+              selected = set()
               for i in hits:
-                  chosen.update(range(max(0, i-3), min(len(lines), i+6)))
-
-              last = -2
-              for i in sorted(chosen):
-                  if i > last + 1:
-                      print("... omitted ...")
-                  print(f"{i+1}: {lines[i]}")
-                  last = i
+                  selected.update(
+                      range(max(0, i - 3), min(len(lines), i + 6))
+                  )
+              previous = -2
+              for i in sorted(selected):
+                  if i > previous + 1:
+                      report.append("... omitted ...")
+                  report.append(f"{i + 1}: {lines[i]}")
+                  previous = i
           else:
-              print("No common error keywords detected.")
-              print("Showing final 160 log lines:")
-              start = max(0, len(lines)-160)
+              report.append("No matching error keywords found.")
+              report.append("Last 100 build log lines:")
+              start = max(0, len(lines) - 100)
               for i in range(start, len(lines)):
-                  print(f"{i+1}: {lines[i]}")
+                  report.append(f"{i + 1}: {lines[i]}")
 
-          print("========== END BUILD ERROR REPORT ==========")
-
-          report = Path("failure-report.txt")
-          report.write_text(
-              "\n".join(
-                  f"{i+1}: {line}"
-                  for i, line in enumerate(lines)
-              ),
-              encoding="utf-8"
+          report.append("")
+          report.append(
+              "Startup diagnostic hook is bundled into the built source."
           )
+          report.append(
+              "Runtime errors on the phone are separate from build-time errors."
+          )
+
+          result = "\n".join(report) + "\n"
+          Path("failure-report.txt").write_text(result, encoding="utf-8")
+
+          print("========== BILIPINK AUTOMATIC REPORT ==========")
+          print(result)
+          print("========== END REPORT ==========")
           PY
 
       - name: Upload APK
-        if: steps.build.outcome == 'success'
+        if: always() && steps.apk.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: BiliPink-debug-APK
           path: bin/*.apk
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload diagnostic log
-        if: always() && steps.build.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: BiliPink-build-error-report
-          path: |
-            failure-report.txt
-            build.log
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Finish with correct build status
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BiliPink-diagnostics
+          path: |
+            failure-report.txt
+            build.log
+            startup_diagnostics.py
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Final build status
         if: always()
         env:
-          BUILD_RESULT: ${{ steps.build.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          APK_EXISTS: ${{ steps.apk.outputs.exists }}
         run: |
-          if [ "$BUILD_RESULT" = "success" ]; then
+          if [ "$BUILD_OUTCOME" = "success" ] && [ "$APK_EXISTS" = "true" ]; then
             echo "BiliPink APK build succeeded."
           else
-            echo "::error::BiliPink APK build failed. The error details were printed in the previous step."
+            echo "::error::Build failed or APK is missing. Automatic diagnostics were printed above."
             exit 1
           fi
