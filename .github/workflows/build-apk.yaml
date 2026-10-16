@@ -1,8 +1,6 @@
-name: BiliPink_ABSOLUTE_FIX
+name: BiliPink Final Build
 on:
   push:
-    branches: [ main ]
-  pull_request:
     branches: [ main ]
 
 env:
@@ -10,90 +8,87 @@ env:
   LANG: C.UTF-8
   PYTHONIOENCODING: utf-8
   SDK_ROOT: /home/runner/.buildozer/android/platform/android-sdk
-  CMDLINE_TOOLS_VER: 11076708
+  CMDLINE_TOOLS: 9477386
+  P4A_COMMIT: 2450e70522057403d87465983523271044964915
 
 jobs:
-  build-apk:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
 
-      - name: Python3.11.10
-        uses: actions/setup-python@v7
+      - name: Python 3.10.13（固定死，不许3.11）
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11.10'
+          python-version: "3.10.13"
           architecture: x64
 
-      - name: JDK17
-        uses: actions/setup-java@v6
+      - name: JDK‑17 Temurin
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: FULL WIPE
+      - name: Wipe EVERY old cache leftover
         run: |
           set -e
-          rm -rf ./bin ./build ./__pycache__
+          rm -rf bin build .buildozer __pycache__
           rm -rf /home/runner/.buildozer
           mkdir -p "${SDK_ROOT}"
 
-      - name: Cache buildozer
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/.buildozer
-          key: bilipink-absolute-v1-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            bilipink-absolute-
-
-      - name: Install system packages
+      - name: Install all system deps（一套不多一套不少）
         run: |
           sudo apt update -y
-          sudo apt -y install automake libltdl-dev zip unzip git pkg-config libffi-dev libssl-dev autoconf libtool cmake ant wget
+          sudo apt install -y git wget unzip zip ant autoconf automake libtool pkg-config libffi-dev libssl-dev cmake
 
-      - name: Pip install
+      - name: Lock pip packages
         run: |
-          python -m pip install --upgrade pip setuptools
-          pip install Cython==0.29.37 buildozer==1.6.0 certifi
+          python -m pip install --upgrade pip wheel setuptools
+          pip install Cython==0.29.36 buildozer==1.5.0 certifi
 
-      - name: Prepare SDK — NO PRE-MKDIR TRICK
+      - name: Install SDK + tools copy（这套路径无数次验证）
         run: |
           set -e
           cd "${SDK_ROOT}"
-          wget -q "https://dl.google.com/android/repository/commandlinetools-linux-${{ env.CMDLINE_TOOLS_VER }}_latest.zip"
-          # 直接解压！不要事先建cmdline-tools！zip自带这个文件夹！
-          unzip -q "commandlinetools-linux-${{ env.CMDLINE_TOOLS_VER }}_latest.zip"
-          # 解压完SDK_ROOT下面有个 cmdline-tools → 直接改名 latest！！
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-${{ env.CMDLINE_TOOLS }}_latest.zip
+          unzip -q commandlinetools-linux-${{ env.CMDLINE_TOOLS }}_latest.zip
+          mkdir -p cmdline-tools
           mv cmdline-tools latest
-          # 创建官方推荐目录，把latest放进去
           mkdir cmdline-tools
           mv latest cmdline-tools/
-          # 【欺骗buildozer】完整复制一份latest直接叫 tools！就在SDK_ROOT根目录！
           cp -r cmdline-tools/latest tools
 
-          # 许可文件
           mkdir -p licenses
-          echo -n "24333f8a63b6825ea9c5514f83c2829b009d1fee" > licenses/android-sdk-license
-          echo -n "84831b9409646a918e30573bab4c9c91346d8abd" > licenses/android-sdk-preview-license
-          echo -n "d975f7516a7b320925b521d9642f1347f98d40fe" > licenses/google-gdk-license
-
-          chmod -R u+x tools/bin
-          chmod -R u+x cmdline-tools/latest/bin
+          echo "24333f8a63b6825ea9c5514f83c2829b009d1fee" > licenses/android-sdk-license
 
           echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> $GITHUB_ENV
           echo "ANDROID_HOME=${SDK_ROOT}" >> $GITHUB_ENV
-          echo "${SDK_ROOT}/tools/bin" >> $GITHUB_PATH
+          echo "${SDK_ROOT}/tools/bin:${SDK_ROOT}/cmdline-tools/latest/bin" >> $GITHUB_PATH
 
-      - name: Pre‑install SDK packages
+      - name: sdkmanager pull exact versions
+        run: |
+          yes | sdkmanager --sdk_root="${SDK_ROOT}" "platform-tools" "platforms;android-32" "build-tools;32.0.0" "ndk;25.2.9519653"
+
+      - name: Pre‑fetch python‑for‑android & lock commit（最关键一步，不让buildozer自动拉最新）
         run: |
           set -e
-          yes | sdkmanager --sdk_root="${SDK_ROOT}" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+          git clone https://github.com/kivy/python-for-android.git /home/runner/.buildozer/android/platform/python-for-android
+          cd /home/runner/.buildozer/android/platform/python-for-android
+          git checkout ${{ env.P4A_COMMIT }}
 
-      - name: Build APK
-        run: buildozer android debug
+      - name: Patch buildozer.spec（不要自己手改冲突！让脚本写入）
+        run: |
+          echo "p4a.source_dir = /home/runner/.buildozer/android/platform/python-for-android" >> buildozer.spec
+          echo "android.api = 32" >> buildozer.spec
+          echo "android.ndk = 25.2.9519653" >> buildozer.spec
+          echo "requirements = python3==3.10.13,kivy==2.2.1,kivymd==1.2.0,requests" >> buildozer.spec
+          echo "android.accept_sdk_license = True" >> buildozer.spec
 
-      - name: Upload APK
+      - name: Build APK --log-level=2
+        run: buildozer android debug --log-level=2
+
+      - name: Save APK
         uses: actions/upload-artifact@v4
         with:
-          name: BiliPink-APK
+          name: BiliPink-apk
           path: bin/*.apk
