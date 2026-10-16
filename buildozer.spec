@@ -2,34 +2,41 @@
 title = BiliPink
 package.name = bilipink
 package.domain = org.bilipink
+
 source.dir = .
-source.include_exts = py,kv,json
-# 资源完全交给 android.add_assets；这里只抓源码，不带任何资源
-source.include_patterns =
-source.exclude_dirs = .git,.github,bin,.buildozer,__pycache__
-version = 1.1.0
-orientation = portrait
-fullscreen = 0
+source.include_exts = py,png,jpg,jpeg,otf,json,txt
+source.include_dirs = fonts
 
-requirements = python3,kivy==2.3.0,kivymd==1.2.0,jnius,certifi,requests,plyer
+# ✅绝对别动！
+android.add_assets = fonts:fonts
 
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_MEDIA_VIDEO,READ_MEDIA_IMAGES,POST_NOTIFICATIONS,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
+# API ↔ NDK 严格锁死（这组是Actions最稳组合，之前33‑r25b配对会随机抛错）
+android.api = 34
+android.ndk = 26b
+android.sdk = 24
 
-android.api = 33
-android.minapi = 30
-android.ndk = 25c
-android.ndk_api = 30
-android.archs = arm64-v8a
-android.accept_sdk_license = True
+# ❗删掉旧的 use-certifi、乱加的meta‑data（之前meta那行语法是错的！p4a不认 ;isDebug=true）
+android.gradle_dependencies = androidx.core:core-ktx:1.12.0
+
+# 权限修正：MANAGE_EXTERNAL_STORAGE不能直接写在permission数组！要用extra-manifest
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES,READ_MEDIA_VIDEO
+android.extra_manifest_xml = ./manifest-append.xml
 android.enable_androidx = True
+android.use_aar = True
 
-# ⚠️文件级映射！只把 fonts/NotoSansSC‑Regular.otf → assets/fonts/NotoSansSC‑Regular.otf
-# avatar-reference.jpg 完全没写，就不会进assets
-android.add_assets = fonts/NotoSansSC-Regular.otf:assets/fonts/NotoSansSC-Regular.otf
+requirements = python3==3.11,kivy==2.3.0,urllib3,requests,yt-dlp==2026.9.25
 
-p4a.extra_args = --use-certifi
-p4a.branch = v2024.01.21
+android.p4a_bootstrap = sdl2
+android.p4a_apk_format = debug
+
+android.icon = fonts/icon.png
+android.presplash_color = #F26A8D
+android.copy_fonts = False
+
+source.exclude_patterns = __pycache__,*.pyc,.git,*.md
 
 [buildozer]
 log_level = 2
-warn_on_root = 1
+warn_on_root = 0
+# ❗非常关键：关闭自动注入--use-certifi（就是日志报错来源！新版本buildozer会乱塞这个不存在参数）
+p4a_args = --ignore-setup-py
