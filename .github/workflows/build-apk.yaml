@@ -16,6 +16,7 @@ env:
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
   CYTHON_LANGUAGE_LEVEL: '3'
+  PATH: ${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin:${{ env.PATH }}
 
 jobs:
   build-apk:
@@ -27,62 +28,11 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Prepare build environment
+      - name: Install system dependencies FIRST
         shell: bash
         run: |
           set -e
-          rm -rf "$HOME/.buildozer"
-          mkdir -p "$HOME/.buildozer"
-          rm -rf "$ANDROID_HOME"
-          mkdir -p "$ANDROID_HOME/licenses"
-
-      - name: Download Android SDK + Pre‑accept Licenses
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
-          cd "$ANDROID_HOME/cmdline-tools"
-
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O commandline-tools.zip
-          unzip -q commandline-tools.zip
-          mkdir -p latest
-          mv cmdline-tools/* latest/
-
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            --sdk_root="$ANDROID_HOME" \
-            "platform-tools" \
-            "platforms;android-33" \
-            "build-tools;33.0.2"
-
-      - name: Cache Android SDK and Buildozer
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.buildozer
-            ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v9-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            bilipink-sdk-v9-${{ runner.os }}-
-
-      - name: Install system dependencies
-        shell: bash
-        run: |
-          set -e
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y \
             automake \
             libltdl-dev \
@@ -101,9 +51,63 @@ jobs:
             libncursesw5-dev \
             libtinfo5 \
             gettext \
-            autopoint
+            autopoint \
+            wget
 
-      - name: Install Python packages
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Prepare build directories & license folder
+        shell: bash
+        run: |
+          set -e
+          rm -rf "$HOME/.buildozer"
+          mkdir -p "$HOME/.buildozer"
+          rm -rf "$ANDROID_HOME"
+          mkdir -p "$ANDROID_HOME/licenses"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+
+      - name: Download Android SDK + Hardcode license hashes ✅许可焊死
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ANDROID_HOME/cmdline-tools"
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O commandline-tools.zip
+          unzip -q commandline-tools.zip
+          # 修复解压嵌套：把解压出来的 cmdline-tools → latest
+          mv cmdline-tools latest
+          rm -f commandline-tools.zip
+
+          # Google官方许可哈希（永久有效）
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo "d975f751698a77b662f1254ddbeed3901f976be5" > "$ANDROID_HOME/licenses/android-sdk-license-5be876d5"
+
+          sdkmanager --sdk_root="$ANDROID_HOME" --update
+          sdkmanager --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2"
+
+      - name: Cache Android SDK and Buildozer workdir
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            ${{ github.workspace }}/android-sdk
+          key: bilipink-sdk-v10-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            bilipink-sdk-v10-${{ runner.os }}-
+
+      - name: Install Python packages & P4A develop
         shell: bash
         run: |
           set -e
@@ -112,7 +116,6 @@ jobs:
             'Cython==3.0.11' \
             'buildozer==1.5.0' \
             certifi
-          # ✅固定develop分支，永远不会出现tag不存在！
           python -m pip install \
             'git+https://github.com/kivy/python-for-android.git@develop'
 
@@ -122,8 +125,9 @@ jobs:
           buildozer --version
           python -c "import Cython, certifi; print('Cython:', Cython.__version__); print('certifi:', certifi.__version__)"
           java -version
+          sdkmanager --version
 
-      - name: Check project files and fonts
+      - name: Check project files and fonts folder
         shell: bash
         run: |
           set -e
@@ -132,20 +136,20 @@ jobs:
           if [ ! -d fonts ]; then echo "::error::fonts folder missing"; exit 1; fi
           FONT_COUNT=$(find fonts -maxdepth 2 -type f -iname '*.ttf' -o -iname '*.otf' | wc -l)
           if [ "$FONT_COUNT" -eq 0 ]; then echo "::error::fonts里面没有ttf/otf字体"; exit 1; fi
-          echo "OK: Found $FONT_COUNT font file(s)"
+          echo "✅ OK: Found $FONT_COUNT font file(s)"
 
-      - name: Check Python syntax and UTF‑8
+      - name: Check all *.py syntax & UTF‑8
         shell: bash
         run: |
           set -e
           python - <<'PY'
           from pathlib import Path
           files = sorted(Path(".").glob("*.py"))
-          if not files: raise SystemExit("No Python files")
+          if not files: raise SystemExit("No Python source files found!")
           for f in files:
               src = f.read_text("utf-8")
               compile(src, str(f), "exec")
-              print("OK", f)
+              print("OK", f.name)
           PY
 
       - name: Build BiliPink APK
@@ -158,7 +162,7 @@ jobs:
         run: |
           buildozer -v android debug
 
-      - name: Upload APK
+      - name: Upload final APK
         uses: actions/upload-artifact@v4
         with:
           name: bilipink-apk
@@ -166,13 +170,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload build logs
+      - name: Upload all build logs (always run)
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: bilipink-build-logs
           path: |
             ~/.buildozer/build.log
-            .buildozer/android/platform/build-*/dists/*/build.log
+            ~/.buildozer/android/platform/build-*/dists/*/build.log
           if-no-files-found: ignore
           retention-days: 7
