@@ -7,8 +7,6 @@ on:
 env:
   ANDROID_HOME: ${{github.workspace}}/android-sdk
   ANDROID_SDK_ROOT: ${{github.workspace}}/android-sdk
-  P4A_ANDROID_NDK: ${{github.workspace}}/android-sdk/ndk/25.2.9519653
-  P4A_SDK: ${{github.workspace}}/android-sdk
   P4A_JOBS: 2
   _JAVA_OPTIONS: -Xmx2200M
   GRADLE_OPTS: "-Dorg.gradle.daemon=false"
@@ -16,11 +14,11 @@ env:
 jobs:
   build-apk:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 200
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enable Swap
+      - name: Enable Swap(工作区内，无权限坑)
         run: |
           SWAPIMG="${GITHUB_WORKSPACE}/swap.img"
           rm -f "$SWAPIMG"
@@ -45,13 +43,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ✅重点！不再硬锁不存在的p4a版本！只锁cython+buildozer
-      - name: Pip install fixed
+      - name: Pip install
         run: |
           python -m pip install --upgrade pip
           python -m pip install --no-cache-dir Cython==3.0.11 buildozer==1.5.0
 
-      - name: Pre‑fetch SDK+NDK + trick buildozer path
+      # 【最重要！双路预部署！SDK放android-sdk；NDK直接解压到buildozer盯着的那个名字！】
+      - name: Pre deploy SDK + NDK to EXACT buildozer expected path
         run: |
           mkdir -p $ANDROID_HOME/licenses
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
@@ -59,16 +57,23 @@ jobs:
 
           mkdir -p $ANDROID_HOME/cmdline-tools
           cd $ANDROID_HOME/cmdline-tools
-          wget --timeout=180 https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          wget --timeout=240 https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q commandlinetools-linux-11076708_latest.zip
           mv cmdline-tools latest
           rm commandlinetools-linux-11076708_latest.zip
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
-          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;25.2.9519653"
+          # 直接下载NDK并且【解压到 buildozer 默认等待的那个目录名字！！名字错一个字母都会触发下载！】
+          B_PLATFORM=~/.buildozer/android/platform
+          mkdir -p $B_PLATFORM
+          cd $B_PLATFORM
+          wget --timeout=240 https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+          unzip -q android-ndk-r25b-linux.zip
+          rm android-ndk-r25b-linux.zip
 
-          mkdir -p ~/.buildozer/android/platform
-          ln -sfn $ANDROID_HOME ~/.buildozer/android/platform/android-sdk
+          # SDK软链也保留给p4a读取
+          ln -sfn $ANDROID_HOME $B_PLATFORM/android-sdk
 
       - name: Clean old build trash
         run: |
