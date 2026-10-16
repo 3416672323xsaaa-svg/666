@@ -21,7 +21,7 @@ jobs:
   build-apk:
     name: Build BiliPink APK
     runs-on: ubuntu-22.04
-    timeout-minutes: 150
+    timeout-minutes: 180
 
     steps:
       - name: Checkout source code
@@ -74,9 +74,9 @@ jobs:
           path: |
             ~/.buildozer
             ${{ github.workspace }}/android-sdk
-          key: bilipink-sdk-v8-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          key: bilipink-sdk-v9-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            bilipink-sdk-v8-${{ runner.os }}-
+            bilipink-sdk-v9-${{ runner.os }}-
 
       - name: Install system dependencies
         shell: bash
@@ -112,9 +112,9 @@ jobs:
             'Cython==3.0.11' \
             'buildozer==1.5.0' \
             certifi
-          # ✅ 修正！正式tag = 2024.10
+          # ✅固定develop分支，永远不会出现tag不存在！
           python -m pip install \
-            'git+https://github.com/kivy/python-for-android.git@2024.10'
+            'git+https://github.com/kivy/python-for-android.git@develop'
 
       - name: Print tool versions
         shell: bash
@@ -164,7 +164,7 @@ jobs:
           name: bilipink-apk
           path: bin/*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days:14
 
       - name: Upload build logs
         if: ${{ always() }}
@@ -175,4 +175,4 @@ jobs:
             ~/.buildozer/build.log
             .buildozer/android/platform/build-*/dists/*/build.log
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days:7
