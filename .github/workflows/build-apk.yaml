@@ -58,15 +58,21 @@ jobs:
           python -m pip install --upgrade pip setuptools
           pip install Cython==0.29.37 buildozer==1.6.0 certifi
 
-      - name: Bootstrap buildozer
-        run: |
-          buildozer android debug || true
+      - name: Fully download Android SDK & NDK (等待全部下完)
+        run: buildozer android sdk_download
 
-      - name: Accept SDK licenses
+      - name: Accept all SDK Licenses（带多层容错）
         run: |
           SDK=$(buildozer android sdk_path)
-          TOOL="$SDK/cmdline-tools/latest/bin/sdkmanager"
-          [ -f "$TOOL" ] && yes | $TOOL --licenses >/dev/null 2>&1 || true
+          TOOL1="${SDK}/cmdline-tools/latest/bin/sdkmanager"
+          TOOL2="${SDK}/cmdline-tools/bin/sdkmanager"
+          if [ -f "$TOOL1" ]; then
+            yes | $TOOL1 --licenses >/dev/null 2>&1 || true
+          elif [ -f "$TOOL2" ]; then
+            yes | $TOOL2 --licenses >/dev/null 2>&1 || true
+          else
+            echo "sdkmanager暂时找不到，交给buildozer内置授权处理"
+          fi
 
       - name: Version print
         run: |
