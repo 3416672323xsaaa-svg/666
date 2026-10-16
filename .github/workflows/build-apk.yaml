@@ -164,7 +164,7 @@ jobs:
           name: bilipink-apk
           path: bin/*.apk
           if-no-files-found: error
-          retention-days:14
+          retention-days: 14
 
       - name: Upload build logs
         if: ${{ always() }}
@@ -175,4 +175,4 @@ jobs:
             ~/.buildozer/build.log
             .buildozer/android/platform/build-*/dists/*/build.log
           if-no-files-found: ignore
-          retention-days:7
+          retention-days: 7
