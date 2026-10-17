@@ -940,7 +940,7 @@ class BiliPinkApp(App):
                 self._label("视频简介", 15, PINK, True, height=dp(32))
             )
             self.content.add_widget(
-                self._label（
+                self._label(
                     str(description)[:1500],
             12,
                     MUTED,
