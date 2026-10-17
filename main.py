@@ -217,8 +217,8 @@ class BiliPinkApp(App):
         global FONT, _FONT_LOADED
 
         if _FONT_LOADED:
-            return
-            try:
+            return        
+        try:
             font_path = os.path.join(
                 self.user_data_dir,
                 "NotoSansSC-Regular.otf",
