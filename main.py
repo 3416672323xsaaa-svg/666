@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 """BiliPink v2.5.0 | Android | Bilibili downloader"""
-# ==========【新增SSL证书修复：放在所有业务import最前面】==========
+
 import os
-# certifi 全局CA证书配置，解决Android下 _ssl.c:1006 证书报错
+
+# Android SSL 证书配置
 try:
     import certifi
-    os.environ['SSL_CERT_FILE'] = certifi.where()
-    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+    os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 except ImportError:
-    # 桌面本地运行没有装certifi不会崩溃，打包APK必须在spec加上certifi依赖
     pass
-# ==========================================================
 
 import json
 import time
@@ -18,6 +17,7 @@ import shutil
 import threading
 import urllib.request
 from datetime import datetime
+
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -35,6 +35,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.image import Image
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, RoundedRectangle, Line
+
 from bili_api import (
     get_video_info,
     get_download_options,
@@ -47,6 +48,7 @@ from downloader import (
     safe_filename,
     install_ffmpeg_from_assets,
 )
+
 PINK = (0.91, 0.39, 0.57, 1)
 PINK_LIGHT = (1.0, 0.91, 0.95, 1)
 WHITE = (1, 1, 1, 1)
@@ -57,6 +59,7 @@ GREEN = (0.30, 0.66, 0.40, 1)
 RED = (0.82, 0.25, 0.30, 1)
 FONT = "Roboto"
 _FONT_LOADED = False
+
 UA = (
     "Mozilla/5.0 (Linux; Android 14) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -103,6 +106,7 @@ class Surface(BoxLayout):
         super().__init__(**kwargs)
         self._bg = bg
         self._radius = radius
+
         with self.canvas.before:
             Color(0, 0, 0, 0.055)
             self.shadow = RoundedRectangle(
@@ -116,6 +120,7 @@ class Surface(BoxLayout):
                 size=self.size,
                 radius=[radius],
             )
+
         self.bind(pos=self._update_canvas, size=self._update_canvas)
 
     def _update_canvas(self, *_):
@@ -130,6 +135,7 @@ class BiliPinkApp(App):
 
     def build(self):
         Window.clearcolor = BG
+
         self.busy = False
         self.current_info = None
         self.current_options = []
@@ -140,10 +146,9 @@ class BiliPinkApp(App):
         self.page_name = "home"
         self.cancel_flags = {}
         self._history_lock = threading.Lock()
+
         self._load_history()
 
-        # 尝试从 APK Assets 安装 FFmpeg。
-        # 即使失败，普通单流下载仍可以使用。
         try:
             if platform == "android":
                 threading.Thread(
@@ -159,6 +164,7 @@ class BiliPinkApp(App):
         )
         self.body = BoxLayout(orientation="vertical")
         self.root_layout.add_widget(self.body)
+
         self.nav = BoxLayout(
             size_hint_y=None,
             height=dp(62),
@@ -166,6 +172,7 @@ class BiliPinkApp(App):
             spacing=dp(55),
         )
         self.root_layout.add_widget(self.nav)
+
         Clock.schedule_once(self._load_cjk_font_safe, 0.2)
         self.show_home()
         return self.root_layout
@@ -177,17 +184,21 @@ class BiliPinkApp(App):
         if platform != "android":
             local = os.path.abspath(asset_path)
             return local if os.path.isfile(local) else None
+
         try:
             from jnius import autoclass
+
             activity_class = autoclass(
                 "org.kivy.android.PythonActivity"
             )
             activity = activity_class.mActivity
             stream = activity.getAssets().open(asset_path)
+
             os.makedirs(
                 os.path.dirname(dest_path),
                 exist_ok=True,
             )
+
             try:
                 with open(dest_path, "wb") as output:
                     while True:
@@ -197,24 +208,29 @@ class BiliPinkApp(App):
                         output.write(bytes([int(byte_value) & 255]))
             finally:
                 stream.close()
+
             return dest_path if os.path.isfile(dest_path) else None
         except Exception:
             return None
 
     def _load_cjk_font_safe(self, _dt):
         global FONT, _FONT_LOADED
+
         if _FONT_LOADED:
             return
+
         try:
             font_path = os.path.join(
                 self.user_data_dir,
                 "NotoSansSC-Regular.otf",
             )
+
             if not os.path.isfile(font_path):
                 self._extract_asset_to_file(
                     "fonts/NotoSansSC-Regular.otf",
                     font_path,
                 )
+
             if os.path.isfile(font_path):
                 LabelBase.register(
                     name="BiliCJK",
@@ -228,7 +244,9 @@ class BiliPinkApp(App):
                 FONT = "Roboto"
         except Exception:
             FONT = "Roboto"
+
         _FONT_LOADED = True
+
         if self.page_name == "home":
             self.show_home()
         else:
@@ -242,6 +260,7 @@ class BiliPinkApp(App):
             )
             if os.path.isfile(path):
                 return path
+
             return self._extract_asset_to_file(
                 "fonts/avatar-reference.jpg",
                 path,
@@ -272,6 +291,7 @@ class BiliPinkApp(App):
             size_hint_y=None,
             height=dp(height or max(25, size * 1.8)),
         )
+
         label.bind(
             size=lambda obj, *_:
             setattr(obj, "text_size", (obj.width, None))
@@ -304,11 +324,13 @@ class BiliPinkApp(App):
 
     def _scroll(self):
         self.body.clear_widgets()
+
         self.scroll = ScrollView(
             do_scroll_x=False,
             bar_width=dp(3),
             scroll_type=["bars", "content"],
         )
+
         self.content = BoxLayout(
             orientation="vertical",
             size_hint_y=None,
@@ -318,21 +340,25 @@ class BiliPinkApp(App):
         self.content.bind(
             minimum_height=self.content.setter("height")
         )
+
         self.scroll.add_widget(self.content)
         self.body.add_widget(self.scroll)
 
     def _nav(self):
         self.nav.clear_widgets()
+
         for key, caption in (
             ("home", "主页"),
             ("mine", "我的"),
         ):
             active = self.page_name == key
             color = PINK if active else MUTED
+
             cell = BoxLayout(
                 orientation="vertical",
                 spacing=0,
             )
+
             button = Button(
                 text="",
                 font_name=FONT,
@@ -355,8 +381,11 @@ class BiliPinkApp(App):
                     self.show_mine()
 
             button.bind(on_release=goto_page)
-            label.bind(on_touch_down=lambda obj, touch, k=key:
-                self._nav_touch(obj, touch, k))
+            label.bind(
+                on_touch_down=lambda obj, touch, k=key:
+                self._nav_touch(obj, touch, k)
+            )
+
             cell.add_widget(button)
             cell.add_widget(label)
             self.nav.add_widget(cell)
@@ -376,7 +405,9 @@ class BiliPinkApp(App):
             spacing=dp(12),
             padding=dp(14),
         )
+
         scroll = ScrollView(do_scroll_x=False)
+
         label = Label(
             text=str(message),
             font_name=FONT,
@@ -394,13 +425,16 @@ class BiliPinkApp(App):
             texture_size=lambda obj, size:
             setattr(obj, "height", size[1] + dp(8))
         )
+
         scroll.add_widget(label)
         layout.add_widget(scroll)
+
         popup = Popup(
             title=title,
             content=layout,
             size_hint=(0.90, 0.68),
         )
+
         layout.add_widget(
             self._btn(
                 "关闭",
@@ -420,11 +454,13 @@ class BiliPinkApp(App):
         self.page_name = "home"
         self._scroll()
         self._nav()
+
         top = BoxLayout(
             size_hint_y=None,
             height=dp(60),
             spacing=dp(10),
         )
+
         avatar_path = self._load_avatar()
         if avatar_path and os.path.isfile(avatar_path):
             avatar = Image(
@@ -441,13 +477,16 @@ class BiliPinkApp(App):
                 size_hint_x=None,
                 width=dp(44),
             )
+
         top.add_widget(avatar)
+
         search = BoxLayout(
             size_hint_y=None,
             height=dp(46),
             padding=[dp(10), dp(2)],
             spacing=dp(5),
         )
+
         with search.canvas.before:
             Color(*WHITE)
             search.bg = RoundedRectangle(
@@ -479,6 +518,7 @@ class BiliPinkApp(App):
             )
 
         search.bind(pos=update_search_bg, size=update_search_bg)
+
         self.search_input = TextInput(
             hint_text="输入BV / AV / 链接 / 关键词",
             font_name=FONT,
@@ -494,6 +534,7 @@ class BiliPinkApp(App):
         self.search_input.bind(
             on_text_validate=lambda *_: self.do_search_or_parse()
         )
+
         search.add_widget(self.search_input)
         search.add_widget(
             self._btn(
@@ -507,11 +548,13 @@ class BiliPinkApp(App):
         )
         top.add_widget(search)
         self.content.add_widget(top)
+
         filter_row = BoxLayout(
             size_hint_y=None,
             height=dp(40),
             spacing=dp(5),
         )
+
         for name in ("全部", "已完成", "进行中", "已失败"):
             selected = self.filter == name
             filter_row.add_widget(
@@ -524,7 +567,9 @@ class BiliPinkApp(App):
                     selected,
                 )
             )
+
         self.content.add_widget(filter_row)
+
         if self.search_result_list:
             self.content.add_widget(
                 self._label(
@@ -539,9 +584,11 @@ class BiliPinkApp(App):
                 self.content.add_widget(
                     self._search_result_card(item)
                 )
+
         visible = []
         for task in self.tasks:
             status = task.get("status", "")
+
             if self.filter == "全部":
                 visible.append(task)
             elif self.filter == "已完成" and status == "已完成":
@@ -552,20 +599,23 @@ class BiliPinkApp(App):
                 visible.append(task)
             elif self.filter == "已失败" and status == "已失败":
                 visible.append(task)
+
         if self.filter in ("全部", "已完成"):
             for record in self.history:
                 if not any(
-                    x.get("id") == record.get("id")
-                    for x in visible
+                    item.get("id") == record.get("id")
+                    for item in visible
                 ):
                     visible.append({
                         **record,
                         "status": "已完成",
                     })
+
         visible.sort(
             key=lambda item: item.get("created", ""),
             reverse=True,
         )
+
         if not visible and not self.search_result_list:
             self.content.add_widget(
                 self._label(
@@ -577,6 +627,7 @@ class BiliPinkApp(App):
                     dp(90),
                 )
             )
+
         for task in visible:
             self.content.add_widget(self._task_card(task))
 
@@ -589,23 +640,29 @@ class BiliPinkApp(App):
     # -----------------------------------------------------
     def do_search_or_parse(self):
         text = self.search_input.text.strip()
+
         if not text:
             self._popup("提示", "请先输入BV号、AV号、链接或关键词。")
             return
+
         upper = text.upper()
         has_video_id = "BV" in upper or "AV" in upper
         has_link = "BILIBILI.COM" in upper or "B23.TV" in upper
+
         if has_video_id or has_link:
             self.search_result_list = []
             self.parse_video()
             return
+
         if self.busy:
             self._popup("请稍候", "当前有任务正在处理。")
             return
+
         self.busy = True
         self.content.add_widget(
             self._label("正在搜索……", 13, MUTED, height=dp(35))
         )
+
         threading.Thread(
             target=self._search_worker,
             args=(text,),
@@ -619,6 +676,7 @@ class BiliPinkApp(App):
         except Exception as exc:
             result = []
             error = str(exc)
+
         Clock.schedule_once(
             lambda _dt: self._search_done(result, error),
             0,
@@ -628,6 +686,7 @@ class BiliPinkApp(App):
         self.busy = False
         self.search_result_list = result or []
         self.show_home()
+
         if error:
             self._popup("搜索失败", error)
 
@@ -639,6 +698,7 @@ class BiliPinkApp(App):
             spacing=dp(5),
         )
         card.bind(minimum_height=card.setter("height"))
+
         card.add_widget(
             self._label(
                 item.get("title", "未命名视频"),
@@ -656,6 +716,7 @@ class BiliPinkApp(App):
                 height=dp(24),
             )
         )
+
         bvid = item.get("bvid", "")
         card.add_widget(
             self._btn(
@@ -673,6 +734,7 @@ class BiliPinkApp(App):
         if not bvid:
             self._popup("提示", "搜索结果没有提供BV号。")
             return
+
         self.search_input.text = bvid
         self.search_result_list = []
         self.parse_video()
@@ -693,12 +755,15 @@ class BiliPinkApp(App):
         if self.busy:
             self._popup("请稍候", "当前已有解析或搜索任务。")
             return
+
         raw = self.search_input.text.strip()
         if not raw:
             self._popup("提示", "请先输入视频链接。")
             return
+
         self.busy = True
         task_id = str(time.time_ns())
+
         task = {
             "id": task_id,
             "title": "正在解析视频……",
@@ -707,8 +772,10 @@ class BiliPinkApp(App):
             "percent": 0,
             "error": "",
         }
+
         self.tasks.insert(0, task)
         self.show_home()
+
         threading.Thread(
             target=self._parse_worker,
             args=(raw, task_id),
@@ -720,6 +787,7 @@ class BiliPinkApp(App):
             info = get_video_info(raw)
             options = get_download_options(info, "")
             cover_path = ""
+
             cover_url = info.get("cover", info.get("thumbnail", ""))
             if cover_url:
                 try:
@@ -728,13 +796,12 @@ class BiliPinkApp(App):
                         "covers",
                     )
                     os.makedirs(cover_dir, exist_ok=True)
+
                     cover_name = safe_filename(
                         info.get("bvid", "video")
                     ) + ".jpg"
-                    cover_path = os.path.join(
-                        cover_dir,
-                        cover_name,
-                    )
+                    cover_path = os.path.join(cover_dir, cover_name)
+
                     if not os.path.isfile(cover_path):
                         request = urllib.request.Request(
                             cover_url,
@@ -743,16 +810,20 @@ class BiliPinkApp(App):
                                 "Referer": "https://www.bilibili.com/",
                             },
                         )
+
                         with urllib.request.urlopen(
                             request,
                             timeout=20,
                         ) as response:
                             data = response.read()
+
                         if data:
                             with open(cover_path, "wb") as file:
                                 file.write(data)
+
                 except Exception:
                     cover_path = ""
+
             Clock.schedule_once(
                 lambda _dt: self._parsed(
                     task_id,
@@ -762,6 +833,7 @@ class BiliPinkApp(App):
                 ),
                 0,
             )
+
         except Exception as exc:
             message = str(exc)
             Clock.schedule_once(
@@ -773,9 +845,11 @@ class BiliPinkApp(App):
         self.busy = False
         self.current_info = info or {}
         self.current_options = options or []
+
         task = self._find_task(task_id)
         if task is None:
             return
+
         task.update({
             "title": self.current_info.get("title", "未命名视频"),
             "status": "等待下载",
@@ -784,25 +858,29 @@ class BiliPinkApp(App):
             "percent": 0,
             "error": "",
         })
+
         self.show_video_options()
 
     def _parse_error(self, task_id, message):
         self.busy = False
         task = self._find_task(task_id)
+
         if task:
             task["status"] = "已失败"
             task["error"] = str(message)
+
         self.show_home()
         self._popup("解析失败", message)
-
-    # -----------------------------------------------------
+        # -----------------------------------------------------
     # 视频信息与画质选择
     # -----------------------------------------------------
     def show_video_options(self):
         info = self.current_info or {}
         options = self.current_options or []
+
         self._scroll()
         self._nav()
+
         self.content.add_widget(
             self._label("视频详情", 22, PINK, True, height=dp(42))
         )
@@ -815,6 +893,7 @@ class BiliPinkApp(App):
                 height=dp(56),
             )
         )
+
         owner = info.get("owner", {})
         if isinstance(owner, dict):
             author = owner.get(
@@ -823,6 +902,7 @@ class BiliPinkApp(App):
             )
         else:
             author = str(owner or info.get("author", "未知UP主"))
+
         details = [
             ("BV号", info.get("bvid", "未知")),
             ("AV号", info.get("aid", "未知")),
@@ -836,6 +916,7 @@ class BiliPinkApp(App):
             ("收藏", fmt_num(info.get("favorite", 0))),
             ("评论", fmt_num(info.get("reply", 0))),
         ]
+
         card = Surface(
             orientation="vertical",
             size_hint_y=None,
@@ -843,6 +924,7 @@ class BiliPinkApp(App):
             spacing=dp(3),
         )
         card.bind(minimum_height=card.setter("height"))
+
         for key, value in details:
             card.add_widget(
                 self._label(
@@ -852,7 +934,9 @@ class BiliPinkApp(App):
                     height=dp(25),
                 )
             )
+
         self.content.add_widget(card)
+
         description = info.get("desc", info.get("description", ""))
         if description:
             self.content.add_widget(
@@ -866,6 +950,7 @@ class BiliPinkApp(App):
                     height=dp(100),
                 )
             )
+
         self.content.add_widget(
             self._label(
                 "选择可用画质",
@@ -875,6 +960,7 @@ class BiliPinkApp(App):
                 height=dp(38),
             )
         )
+
         if not options:
             self.content.add_widget(
                 self._label(
@@ -885,6 +971,7 @@ class BiliPinkApp(App):
                     height=dp(70),
                 )
             )
+
         for option in options:
             self.content.add_widget(
                 self._btn(
@@ -897,6 +984,7 @@ class BiliPinkApp(App):
                     True,
                 )
             )
+
         self.content.add_widget(
             self._btn(
                 "返回主页",
@@ -911,6 +999,7 @@ class BiliPinkApp(App):
     def _option_label(self, option):
         if not isinstance(option, dict):
             return str(option)
+
         name = (
             option.get("label")
             or option.get("name")
@@ -918,29 +1007,39 @@ class BiliPinkApp(App):
             or option.get("quality")
             or "可用画质"
         )
+
         kind = str(option.get("type", "video")).lower()
+
         if kind in ("dash", "mp4_dash"):
             kind_text = "DASH音视频"
         elif "audio" in kind:
             kind_text = "音频"
         else:
             kind_text = "视频"
+
         size = option.get("size", option.get("filesize", 0))
         try:
-            size_text = " · " + human_size(size) if float(size or 0) > 0 else ""
+            size_text = (
+                " · " + human_size(size)
+                if float(size or 0) > 0
+                else ""
+            )
         except Exception:
             size_text = ""
+
         return f"{name} · {kind_text}{size_text}"
 
     def _confirm_download(self, option):
         if not isinstance(option, dict):
             self._popup("画质错误", "当前画质数据格式不正确。")
             return
+
         layout = BoxLayout(
             orientation="vertical",
             spacing=dp(12),
             padding=dp(14),
         )
+
         layout.add_widget(
             self._label(
                 self._option_label(option),
@@ -958,16 +1057,19 @@ class BiliPinkApp(App):
                 height=dp(46),
             )
         )
+
         popup = Popup(
             title="确认下载",
             content=layout,
             size_hint=(0.88, 0.40),
         )
+
         row = BoxLayout(
             size_hint_y=None,
             height=dp(42),
             spacing=dp(8),
         )
+
         row.add_widget(
             self._btn(
                 "取消",
@@ -980,13 +1082,17 @@ class BiliPinkApp(App):
         row.add_widget(
             self._btn(
                 "开始下载",
-                lambda: self._begin_download_after_popup(popup, option),
+                lambda: self._begin_download_after_popup(
+                    popup,
+                    option,
+                ),
                 PINK,
                 WHITE,
                 dp(40),
                 True,
             )
         )
+
         layout.add_widget(row)
         popup.open()
 
@@ -1002,9 +1108,11 @@ class BiliPinkApp(App):
         if not info:
             self._popup("无法下载", "请先解析视频。")
             return
+
         task_id = str(time.time_ns())
         title = info.get("title", "BiliPink_video")
         bvid = info.get("bvid", "video")
+
         task = {
             "id": task_id,
             "title": title,
@@ -1016,9 +1124,11 @@ class BiliPinkApp(App):
             "path": "",
             "error": "",
         }
+
         self.tasks.insert(0, task)
         self.cancel_flags[task_id] = threading.Event()
         self.show_home()
+
         threading.Thread(
             target=self._download_worker,
             args=(task_id, info, option),
@@ -1042,6 +1152,7 @@ class BiliPinkApp(App):
             base = app_storage_path()
         except Exception:
             base = self.user_data_dir
+
         path = os.path.join(base, "downloads")
         os.makedirs(path, exist_ok=True)
         return path
@@ -1050,9 +1161,11 @@ class BiliPinkApp(App):
         task = self._find_task(task_id)
         if not task:
             return
+
         task["status"] = status
         if percent is not None:
             task["percent"] = float(percent)
+
         Clock.schedule_once(
             lambda _dt: self.show_home(),
             0,
@@ -1067,16 +1180,23 @@ class BiliPinkApp(App):
         task = self._find_task(task_id)
         if not task:
             return
+
         save_dir = self._downloads_dir()
         title = safe_filename(info.get("title", "BiliPink_video"))
         bvid = safe_filename(info.get("bvid", "video"))
-        output_path = os.path.join(save_dir, f"{title}_{bvid}.mp4")
-        # 避免覆盖已有文件。
+
+        output_path = os.path.join(
+            save_dir,
+            f"{title}_{bvid}.mp4",
+        )
+
+        # 避免覆盖已经存在的文件。
         if os.path.exists(output_path):
             output_path = os.path.join(
                 save_dir,
                 f"{title}_{bvid}_{task_id[-6:]}.mp4",
             )
+
         video_url = (
             option.get("video_url")
             or option.get("url")
@@ -1092,10 +1212,12 @@ class BiliPinkApp(App):
         def on_progress(downloaded, total):
             if is_cancelled():
                 return
+
             if total and total > 0:
                 percent = min(97, downloaded * 97.0 / total)
             else:
                 percent = 0
+
             Clock.schedule_once(
                 lambda _dt, p=percent:
                 self._set_task_progress(task_id, p),
@@ -1104,17 +1226,20 @@ class BiliPinkApp(App):
 
         video_temp = ""
         audio_temp = ""
+
         try:
             is_dash = (
                 option_type in ("dash", "mp4_dash")
                 or bool(audio_url)
             )
+
             if is_dash:
                 if not video_url or not audio_url:
                     raise ValueError(
                         "DASH 选项缺少 video_url 或 audio_url。"
                         "请检查 bili_api.py 返回的画质数据。"
                     )
+
                 video_temp = os.path.join(
                     save_dir,
                     f".{task_id}.video.part",
@@ -1123,7 +1248,9 @@ class BiliPinkApp(App):
                     save_dir,
                     f".{task_id}.audio.part",
                 )
+
                 self._set_task_status(task_id, "下载中", 0)
+
                 download_dash(
                     video_url,
                     audio_url,
@@ -1132,48 +1259,61 @@ class BiliPinkApp(App):
                     progress=on_progress,
                     cancel_check=is_cancelled,
                 )
+
                 if is_cancelled():
                     raise InterruptedError("下载已取消")
+
                 self._set_task_status(task_id, "合并中", 98)
+
                 merge_mp4(
                     video_temp,
                     audio_temp,
                     output_path,
                     cancel_check=is_cancelled,
                 )
+
             else:
                 if not video_url:
                     raise ValueError(
                         "该画质没有视频流 URL，"
                         "请检查 bili_api.py 返回字段。"
                     )
+
                 self._set_task_status(task_id, "下载中", 0)
+
                 download_stream(
                     video_url,
                     output_path,
                     progress=on_progress,
                     cancel_check=is_cancelled,
                 )
+
             if is_cancelled():
                 raise InterruptedError("下载已取消")
+
             if not os.path.isfile(output_path):
                 raise IOError("下载结束但没有找到输出文件。")
+
             if os.path.getsize(output_path) <= 0:
                 raise IOError("输出文件为空。")
+
             Clock.schedule_once(
                 lambda _dt:
                 self._download_done(task_id, output_path),
                 0,
             )
+
         except Exception as exc:
             message = str(exc)
             if isinstance(exc, InterruptedError):
                 message = "任务已取消"
+
             Clock.schedule_once(
                 lambda _dt, msg=message:
                 self._download_error(task_id, msg),
                 0,
             )
+
         finally:
             for path in (video_temp, audio_temp):
                 if path:
@@ -1187,18 +1327,22 @@ class BiliPinkApp(App):
         task = self._find_task(task_id)
         if not task:
             return
+
         task["status"] = "已完成"
         task["percent"] = 100
         task["path"] = path
         task["error"] = ""
         task["time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         self.cancel_flags.pop(task_id, None)
         self._add_history(task)
         self.show_home()
+
         try:
             size = human_size(os.path.getsize(path))
         except OSError:
             size = "未知大小"
+
         self._popup(
             "下载完成",
             f"{task.get('title', '视频')}\n\n"
@@ -1210,12 +1354,15 @@ class BiliPinkApp(App):
         task = self._find_task(task_id)
         if not task:
             return
+
         task["status"] = "已失败"
         task["error"] = str(message)
         self.cancel_flags.pop(task_id, None)
+
         self.show_home()
         self._popup("下载失败", message)
 
+    # 修复点：取消下载方法和下面的任务卡片区域分开。
     def cancel_download(self, task_id):
         event = self.cancel_flags.get(task_id)
         if event:
@@ -1223,7 +1370,8 @@ class BiliPinkApp(App):
             self._popup(
                 "已请求取消",
                 "下载线程将在下一次检查时停止。",
-)# -----------------------------------------------------
+            )
+            # -----------------------------------------------------
     # 任务卡片与详情
     # -----------------------------------------------------
     def _task_card(self, task):
@@ -1234,6 +1382,7 @@ class BiliPinkApp(App):
             padding=dp(9),
             spacing=dp(10),
         )
+
         cover_path = task.get("cover_path", "")
         if cover_path and os.path.isfile(cover_path):
             card.add_widget(
@@ -1249,6 +1398,7 @@ class BiliPinkApp(App):
                 size_hint_x=None,
                 width=dp(90),
             )
+
             with placeholder.canvas.before:
                 Color(*PINK_LIGHT)
                 placeholder.rect = RoundedRectangle(
@@ -1256,6 +1406,7 @@ class BiliPinkApp(App):
                     size=placeholder.size,
                     radius=[dp(10)],
                 )
+
             placeholder.bind(
                 pos=lambda obj, *_:
                 setattr(obj.rect, "pos", obj.pos),
@@ -1268,6 +1419,7 @@ class BiliPinkApp(App):
             orientation="vertical",
             spacing=dp(2),
         )
+
         info.add_widget(
             self._label(
                 task.get("title", "未命名视频"),
@@ -1285,12 +1437,14 @@ class BiliPinkApp(App):
                 height=dp(19),
             )
         )
+
         status = task.get("status", "已完成")
         status_color = (
             GREEN if status == "已完成"
             else RED if status == "已失败"
             else PINK
         )
+
         info.add_widget(
             self._label(
                 f"{status}  {float(task.get('percent', 0)):.0f}%",
@@ -1300,6 +1454,7 @@ class BiliPinkApp(App):
                 height=dp(22),
             )
         )
+
         if status in ("解析中", "等待下载", "下载中", "合并中"):
             info.add_widget(
                 ProgressBar(
@@ -1309,6 +1464,7 @@ class BiliPinkApp(App):
                     height=dp(4),
                 )
             )
+
         card.add_widget(info)
         card.bind(
             on_touch_down=lambda widget, touch, current=task:
@@ -1324,17 +1480,20 @@ class BiliPinkApp(App):
 
     def _show_task(self, task):
         path = task.get("path", "")
+
         message = (
             f"标题：{task.get('title', '视频')}\n"
             f"状态：{task.get('status', '未知')}\n"
             f"任务时间：{task.get('created', '')}\n"
         )
+
         if path:
             message += f"\n文件：{path}\n"
             try:
                 message += f"大小：{human_size(os.path.getsize(path))}"
             except OSError:
                 message += "大小：文件不可访问"
+
         if task.get("error"):
             message += "\n\n错误信息：\n" + task["error"]
 
@@ -1343,7 +1502,9 @@ class BiliPinkApp(App):
             spacing=dp(10),
             padding=dp(12),
         )
+
         scroll = ScrollView(do_scroll_x=False)
+
         label = self._label(
             message,
             12,
@@ -1352,22 +1513,27 @@ class BiliPinkApp(App):
         )
         label.size_hint_y = None
         label.text_size = (dp(260), None)
+
         label.bind(
             texture_size=lambda obj, size:
             setattr(obj, "height", size[1] + dp(10))
         )
+
         scroll.add_widget(label)
         layout.add_widget(scroll)
+
         popup = Popup(
             title="任务详情",
             content=layout,
             size_hint=(0.90, 0.60),
         )
+
         row = BoxLayout(
             size_hint_y=None,
             height=dp(42),
             spacing=dp(8),
         )
+
         if task.get("status") in ("下载中", "等待下载"):
             row.add_widget(
                 self._btn(
@@ -1378,6 +1544,7 @@ class BiliPinkApp(App):
                     dp(40),
                 )
             )
+
         row.add_widget(
             self._btn(
                 "关闭",
@@ -1387,6 +1554,7 @@ class BiliPinkApp(App):
                 dp(40),
             )
         )
+
         layout.add_widget(row)
         popup.open()
 
@@ -1404,6 +1572,7 @@ class BiliPinkApp(App):
                 encoding="utf-8",
             ) as file:
                 data = json.load(file)
+
             self.history = data if isinstance(data, list) else []
         except Exception:
             self.history = []
@@ -1411,6 +1580,7 @@ class BiliPinkApp(App):
     def _save_history(self):
         try:
             os.makedirs(self.user_data_dir, exist_ok=True)
+
             temp_path = self._history_path() + ".tmp"
             with open(
                 temp_path,
@@ -1423,6 +1593,7 @@ class BiliPinkApp(App):
                     ensure_ascii=False,
                     indent=2,
                 )
+
             os.replace(temp_path, self._history_path())
         except Exception:
             pass
@@ -1439,6 +1610,7 @@ class BiliPinkApp(App):
             "path": task.get("path", ""),
             "cover_path": task.get("cover_path", ""),
         }
+
         with self._history_lock:
             self.history = [
                 item for item in self.history
@@ -1454,9 +1626,11 @@ class BiliPinkApp(App):
     def _list_downloaded_files(self):
         folder = self._downloads_dir()
         results = []
+
         try:
             for name in os.listdir(folder):
                 path = os.path.join(folder, name)
+
                 if (
                     os.path.isfile(path)
                     and not name.endswith(".part")
@@ -1465,8 +1639,10 @@ class BiliPinkApp(App):
                     )
                 ):
                     results.append(path)
+
         except OSError:
             pass
+
         results.sort(
             key=lambda path: os.path.getmtime(path),
             reverse=True,
@@ -1477,6 +1653,7 @@ class BiliPinkApp(App):
         self.page_name = "mine"
         self._scroll()
         self._nav()
+
         self.content.add_widget(
             self._label("我的", 24, PINK, True, height=dp(44))
         )
@@ -1506,7 +1683,9 @@ class BiliPinkApp(App):
                 height=dp(38),
             )
         )
+
         files = self._list_downloaded_files()
+
         if not files:
             self.content.add_widget(
                 self._label(
@@ -1517,6 +1696,7 @@ class BiliPinkApp(App):
                     height=dp(76),
                 )
             )
+
         for path in files:
             card = Surface(
                 orientation="vertical",
@@ -1525,6 +1705,7 @@ class BiliPinkApp(App):
                 spacing=dp(6),
             )
             card.bind(minimum_height=card.setter("height"))
+
             card.add_widget(
                 self._label(
                     os.path.basename(path),
@@ -1534,10 +1715,12 @@ class BiliPinkApp(App):
                     height=dp(44),
                 )
             )
+
             try:
                 size = human_size(os.path.getsize(path))
             except OSError:
                 size = "未知大小"
+
             card.add_widget(
                 self._label(
                     size,
@@ -1546,6 +1729,7 @@ class BiliPinkApp(App):
                     height=dp(22),
                 )
             )
+
             card.add_widget(
                 self._btn(
                     "导出到手机 Download 文件夹",
@@ -1556,6 +1740,7 @@ class BiliPinkApp(App):
                     True,
                 )
             )
+
             card.add_widget(
                 self._btn(
                     "删除应用内文件",
@@ -1566,7 +1751,9 @@ class BiliPinkApp(App):
                     dp(38),
                 )
             )
+
             self.content.add_widget(card)
+
         self.content.add_widget(
             self._label(
                 "应用内下载目录：\n" + self._downloads_dir(),
@@ -1580,9 +1767,11 @@ class BiliPinkApp(App):
         if not os.path.isfile(source_path):
             self._popup("导出失败", "源文件不存在。")
             return
+
         try:
             if platform == "android":
                 from android.storage import primary_external_storage_path
+
                 target_dir = os.path.join(
                     primary_external_storage_path(),
                     "Download",
@@ -1594,23 +1783,30 @@ class BiliPinkApp(App):
                     "Downloads",
                     "BiliPink",
                 )
+
             os.makedirs(target_dir, exist_ok=True)
+
             name = os.path.basename(source_path)
             destination = os.path.join(target_dir, name)
+
             if os.path.abspath(destination) == os.path.abspath(source_path):
                 self._popup("提示", "文件已经在目标目录中。")
                 return
+
             if os.path.exists(destination):
                 stem, ext = os.path.splitext(name)
                 destination = os.path.join(
                     target_dir,
                     f"{stem}_{int(time.time())}{ext}",
                 )
+
             shutil.copy2(source_path, destination)
+
             self._popup(
                 "导出完成",
                 f"文件已复制到：\n{destination}",
             )
+
         except Exception as exc:
             self._popup(
                 "导出失败",
@@ -1625,6 +1821,7 @@ class BiliPinkApp(App):
             spacing=dp(12),
             padding=dp(14),
         )
+
         layout.add_widget(
             self._label(
                 "确定删除这个应用内文件吗？\n"
@@ -1634,16 +1831,19 @@ class BiliPinkApp(App):
                 height=dp(65),
             )
         )
+
         popup = Popup(
             title="确认删除",
             content=layout,
             size_hint=(0.88, 0.36),
         )
+
         row = BoxLayout(
             size_hint_y=None,
             height=dp(42),
             spacing=dp(8),
         )
+
         row.add_widget(
             self._btn(
                 "取消",
@@ -1663,19 +1863,24 @@ class BiliPinkApp(App):
                 True,
             )
         )
+
         layout.add_widget(row)
         popup.open()
 
     def _delete_file(self, path, popup):
         popup.dismiss()
+
         try:
             if os.path.isfile(path):
                 os.remove(path)
+
             for record in self.history:
                 if record.get("path") == path:
                     record["path"] = ""
+
             self._save_history()
             self.show_mine()
+
         except Exception as exc:
             self._popup("删除失败", str(exc))
 
