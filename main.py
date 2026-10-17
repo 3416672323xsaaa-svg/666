@@ -629,7 +629,9 @@ class BiliPinkApp(App):
         self.search_result_list = result or []
         self.show_home()
         if error:
-            self._popup("搜索失败", error)def _search_result_card(self, item):
+            self._popup("搜索失败", error)
+
+    def _search_result_card(self, item):
         card = Surface(
             orientation="vertical",
             size_hint_y=None,
