@@ -218,8 +218,7 @@ class BiliPinkApp(App):
 
         if _FONT_LOADED:
             return
-
-        try:
+            try:
             font_path = os.path.join(
                 self.user_data_dir,
                 "NotoSansSC-Regular.otf",
@@ -438,7 +437,7 @@ class BiliPinkApp(App):
         layout.add_widget(
             self._btn(
                 "关闭",
-                popup.dismiss,
+        popup.dismiss,
                 PINK,
                 WHITE,
                 dp(42),
@@ -657,8 +656,7 @@ class BiliPinkApp(App):
         if self.busy:
             self._popup("请稍候", "当前有任务正在处理。")
             return
-
-        self.busy = True
+            self.busy = True
         self.content.add_widget(
             self._label("正在搜索……", 13, MUTED, height=dp(35))
         )
@@ -877,7 +875,6 @@ class BiliPinkApp(App):
     def show_video_options(self):
         info = self.current_info or {}
         options = self.current_options or []
-
         self._scroll()
         self._nav()
 
@@ -1318,7 +1315,7 @@ class BiliPinkApp(App):
             for path in (video_temp, audio_temp):
                 if path:
                     try:
-                        if os.path.isfile(path):
+                    if os.path.isfile(path):
                             os.remove(path)
                     except OSError:
                         pass
@@ -1758,7 +1755,7 @@ class BiliPinkApp(App):
             self._label(
                 "应用内下载目录：\n" + self._downloads_dir(),
                 10,
-                MUTED,
+        MUTED,
                 height=dp(52),
             )
         )
