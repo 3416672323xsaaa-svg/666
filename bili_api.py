@@ -7,6 +7,7 @@ import ssl
 import certifi
 import urllib.parse
 import urllib.request
+import os
 
 
 UA = (
@@ -17,11 +18,21 @@ UA = (
 
 
 def _ssl_context():
-    """优先使用 certifi 提供的 CA 证书。"""
+    """优先使用 certifi 的 CA 证书；失败时再尝试系统证书。"""
     try:
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
+        ca_file = certifi.where()
+        if ca_file and os.path.isfile(ca_file):
+            return ssl.create_default_context(cafile=ca_file)
+    except Exception as exc:
+        print("[BiliPink] certifi CA 加载失败：", exc)
+
+    try:
         return ssl.create_default_context()
+    except Exception as exc:
+        raise RuntimeError(
+            "无法加载 HTTPS 根证书。请检查 APK 是否正确打包 certifi。"
+            + str(exc)
+        ) from exc
 
 
 def _request_json(url, headers=None, timeout=20):
@@ -38,7 +49,9 @@ def _request_json(url, headers=None, timeout=20):
 
     try:
         with urllib.request.urlopen(
-            req, timeout=timeout, context=_ssl_context()
+            req,
+            timeout=timeout,
+            context=_ssl_context(),
         ) as resp:
             raw = resp.read().decode("utf-8", "replace")
     except Exception as exc:
@@ -49,7 +62,9 @@ def _request_json(url, headers=None, timeout=20):
     try:
         data = json.loads(raw)
     except Exception as exc:
-        raise RuntimeError("B站返回的不是有效 JSON 数据") from exc
+        raise RuntimeError(
+            "B站返回的不是有效 JSON 数据"
+        ) from exc
 
     if not isinstance(data, dict):
         raise RuntimeError("B站接口返回了无效数据")
@@ -58,6 +73,7 @@ def _request_json(url, headers=None, timeout=20):
 
 
 def normalize_input(text):
+    """识别 BV、AV、B站短链接及普通视频链接。"""
     text = (text or "").strip()
 
     if not text:
@@ -68,8 +84,8 @@ def normalize_input(text):
         return "https://www.bilibili.com/video/" + bv.group(0)
 
     av = re.search(
-        r"(?i)(?:av\s*|/video/av)(\d+)",
-        text
+        r"(?i)(?:^|[^A-Za-z0-9])av\s*(\d+)(?!\d)",
+        text,
     )
     if av:
         return "https://www.bilibili.com/video/av" + av.group(1)
@@ -77,17 +93,22 @@ def normalize_input(text):
     short = re.search(
         r"https?://(?:b23\.tv|bili2233\.cn)/[^\s，。；,.;]+",
         text,
-        re.I
+        re.I,
     )
     if short:
         return short.group(0).rstrip("，。；,.;")
 
-    url = re.search(r"https?://\S+", text)
+    url = re.search(r"https?://\S+", text, re.I)
     if url:
         value = url.group(0).rstrip("，。；,.;")
-        if any(host in value.lower() for host in (
-            "bilibili.com", "b23.tv", "bili2233.cn"
-        )):
+        if any(
+            host in value.lower()
+            for host in (
+                "bilibili.com",
+                "b23.tv",
+                "bili2233.cn",
+            )
+        ):
             return value
 
     raise ValueError("没有找到有效的 BV/AV 号或 B 站链接。")
@@ -96,20 +117,22 @@ def normalize_input(text):
 def resolve_url(text):
     url = normalize_input(text)
 
-    if "b23.tv" in url.lower():
+    if "b23.tv" in url.lower() or "bili2233.cn" in url.lower():
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": UA}
+            headers={"User-Agent": UA},
         )
         try:
             with urllib.request.urlopen(
-                req, timeout=15, context=_ssl_context()
+                req,
+                timeout=15,
+                context=_ssl_context(),
             ) as resp:
                 return resp.geturl()
         except Exception as exc:
             raise RuntimeError(
                 "B站短链接展开失败：" + str(exc)
-                + "。请尝试直接输入 BV 号。"
+                + "。请尝试直接输入 BV 号或 AV 号。"
             ) from exc
 
     return url
@@ -249,7 +272,9 @@ def get_download_options(info, cookie=""):
                 + urllib.parse.urlencode(qparams)
             )
             result = _request_json(
-                qurl, headers=headers, timeout=22
+                qurl,
+                headers=headers,
+                timeout=22,
             )
 
             if result.get("code") != 0:
@@ -311,7 +336,7 @@ def get_download_options(info, cookie=""):
         if video_items and audio_items:
             audio_items.sort(
                 key=lambda x: x.get("bandwidth", 0),
-                reverse=True
+                reverse=True,
             )
             best_audio = audio_items[0]
 
@@ -340,9 +365,9 @@ def get_download_options(info, cookie=""):
     options.sort(
         key=lambda x: (
             1 if x.get("type") == "dash" else 0,
-            x.get("quality", 0)
+            x.get("quality", 0),
         ),
-        reverse=True
+        reverse=True,
     )
     return options
 
@@ -362,7 +387,6 @@ def bilibili_search(keyword, page=1, page_size=10):
         + urllib.parse.urlencode(params)
     )
 
-    # 不再把网络/SSL 错误静默当作“没有搜索结果”
     data = _request_json(url, timeout=18)
 
     if data.get("code") != 0:
