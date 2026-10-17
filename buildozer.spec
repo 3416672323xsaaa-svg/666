@@ -1,34 +1,37 @@
 [app]
+
 title = BiliPink
 package.name = bilipink
 package.domain = org.bilipink
 
 source.dir = .
-source.include_exts = py,png,jpg,jpeg,ttf,otf,kv,atlas,json,xml,java
-source.include_patterns = assets/*,fonts/*,src/*
+source.include_exts = py,png,jpg,jpeg,ttf,ttc,otf,kv,atlas,json,xml,java
+source.include_patterns = fonts/*,src/*
 
-version = 2.5.1
+version = 2.5.2
 orientation = portrait
 fullscreen = 0
 
-# 固定python3.11，certifi已加入，解决ssl _ssl.c:1006
-requirements = python3==3.10,kivy==2.2.1,kivymd==1.1.1,pillow,pyjnius,certifi
+requirements = python3,kivy==2.2.1,kivymd==1.1.1,pillow,pyjnius,certifi
+
+p4a.python_version = 3.10
 
 android.api = 33
 android.minapi = 24
 android.ndk = 25c
 android.archs = arm64-v8a
 
-# =========关键：把fonts文件夹打入APK Assets！main.py从assets读取otf字体=========
+# 将仓库中现有的 fonts 文件夹打包进 APK
 android.add_assets = fonts
 
-# 补齐存储网络权限，适配Android13
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_MEDIA_VIDEO,READ_MEDIA_IMAGES,WRITE_EXTERNAL_STORAGE
 
+# 只有仓库确实存在 src 文件夹并且需要打包 Java 源码时才保留
 android.add_src = src
 
 android.debuggable = True
 
 [buildozer]
+
 log_level = 2
 warn_on_root = 1
