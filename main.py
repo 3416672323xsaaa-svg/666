@@ -217,7 +217,7 @@ class BiliPinkApp(App):
         global FONT, _FONT_LOADED
 
         if _FONT_LOADED:
-            return        
+            return
         try:
             font_path = os.path.join(
                 self.user_data_dir,
@@ -437,7 +437,7 @@ class BiliPinkApp(App):
         layout.add_widget(
             self._btn(
                 "关闭",
-        popup.dismiss,
+                popup.dismiss,
                 PINK,
                 WHITE,
                 dp(42),
@@ -940,9 +940,9 @@ class BiliPinkApp(App):
                 self._label("视频简介", 15, PINK, True, height=dp(32))
             )
             self.content.add_widget(
-                self._label(
+                self._label（
                     str(description)[:1500],
-                    12,
+            12,
                     MUTED,
                     height=dp(100),
                 )
@@ -1314,7 +1314,7 @@ class BiliPinkApp(App):
         finally:
             for path in (video_temp, audio_temp):
                 if path:
-                    try:        
+                    try:
                         if os.path.isfile(path):
                             os.remove(path)
                     except OSError:
@@ -1368,7 +1368,8 @@ class BiliPinkApp(App):
                 "已请求取消",
                 "下载线程将在下一次检查时停止。",
             )
-            # -----------------------------------------------------
+
+    # -----------------------------------------------------
     # 任务卡片与详情
     # -----------------------------------------------------
     def _task_card(self, task):
@@ -1755,7 +1756,7 @@ class BiliPinkApp(App):
             self._label(
                 "应用内下载目录：\n" + self._downloads_dir(),
                 10,
-        MUTED,
+                MUTED,
                 height=dp(52),
             )
         )
