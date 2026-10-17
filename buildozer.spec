@@ -11,7 +11,7 @@ version = 2.5.1
 orientation = portrait
 fullscreen = 0
 
-# 固定python3.10，certifi已加入，解决ssl _ssl.c:1006
+# 固定python3.11，certifi已加入，解决ssl _ssl.c:1006
 requirements = python3==3.10,kivy==2.3.0,kivymd==1.1.1,pillow,pyjnius,certifi
 
 android.api = 33
