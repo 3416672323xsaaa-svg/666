@@ -1314,8 +1314,8 @@ class BiliPinkApp(App):
         finally:
             for path in (video_temp, audio_temp):
                 if path:
-                    try:
-                    if os.path.isfile(path):
+                    try:        
+                        if os.path.isfile(path):
                             os.remove(path)
                     except OSError:
                         pass
